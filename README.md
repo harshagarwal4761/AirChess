@@ -34,7 +34,7 @@ npm run dev
 
 1. Try a few moves by clicking a piece and a highlighted destination.
 2. Click **Enable air controls**, then allow camera access. Use a regular desktop browser if the embedded preview cannot open your camera.
-3. Keep one hand open and visible in a well-lit room. Point with your index finger, pinch thumb and index finger together over a piece, move, and release over a legal square.
+3. Keep one or both hands open and visible in a well-lit room. Point with your index finger, pinch thumb and index finger together over a piece, move, and release over a legal square.
 4. Hold an open fingertip over a button for 1.3 seconds to activate it. A border shows the dwell timer. Move away before activating that button again.
 5. Create a room and share its link or six-digit code. Your friend joins from their laptop and plays Black. Their camera is independent of yours.
 
@@ -44,13 +44,13 @@ The first camera permission prompt needs a click. The model/wasm download is abo
 
 ## Included
 
-- Local practice playing both sides; no computer opponent yet.
+- Local practice playing both sides with either hand; the active color rotates toward you by default. No computer opponent yet.
 - Server-validated multiplayer rooms, separate White/Black seats, refresh recovery in the same browser tab.
 - Castling, en passant, four promotion choices, check/checkmate, stalemate, insufficient-material draws.
 - Automatic threefold-repetition and fifty-move draws (a casual-play convention, not a full tournament claim procedure).
 - Draw offers, resignation, mutual rematches, PGN export, move history, capture indicators.
 - Mirrored live camera background, landmark skeleton, smoothed pointer, pinch hysteresis, tracking-loss cancellation.
-- Gesture menus/keypad, mouse and keyboard fallback, board opacity settings, optional move sounds.
+- Gesture menus/keypad, mouse and keyboard fallback, a saved 0–100% transparency slider and gesture adjustment buttons, optional move sounds.
 
 Games are untimed. A room expires after seven days without a room-changing action. The room code invites a second player; it is not a login password. Your unguessable player key is stored in this tab's session storage. Refresh preserves it; closing the tab/browser may lose it. There is no account-based recovery yet. Keep the room code before leaving if you intend to rejoin in the same tab.
 
@@ -86,3 +86,6 @@ See [TESTING.md](docs/TESTING.md) for the tested cases and the remaining real-ca
 Describe this as **a gesture-controlled multiplayer chess application using a pretrained hand-tracking model**. Do not claim you trained the landmark model, wrote the chess engine, or validated accuracy across users. [PORTFOLIO.md](docs/PORTFOLIO.md) gives a demo script, architecture explanation, and a practical learning path.
 
 Built with React, TypeScript, Vinext/Vite, Cloudflare D1, chess.js, and MediaPipe. See [THIRD_PARTY.md](docs/THIRD_PARTY.md) for sources. The project is a portfolio prototype, not a hardened public chess service: before opening anonymous access widely, add per-client rate limits, room cleanup, stronger seat recovery, observability, and device testing.
+
+### Two-hand controls
+Both hands have independent numbered cursors. Either can move the current color, but only one hand can carry a piece at a time. Release or cancel that pickup before switching hands. Settings includes Reach assist (less movement to reach the edges) and Follow active side for local practice. Disable either if you prefer a fixed board or direct fingertip mapping.

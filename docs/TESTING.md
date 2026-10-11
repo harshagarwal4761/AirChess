@@ -2,7 +2,7 @@
 
 ## Automated
 
-- `npm test`: 14 tests for turn legality, castling, en passant, all promotion pieces, checkmate, stalemate, material/fifty-move/repetition draws, draw agreement, mutual rematch, resignation, pinch arming/hysteresis/stability/loss, mapping, and scale normalization.
+- `npm test`: 25 tests for turn legality, castling, en passant, all promotion pieces, checkmate, stalemate, material/fifty-move/repetition draws, draw agreement, mutual rematch, resignation, pinch arming/hysteresis/stability/loss, mapping, and scale normalization.
 - `npm run typecheck`: TypeScript compile validation.
 - `npm run build`: complete production Worker/client build.
 - `node tests/multiplayer.integration.mjs`: real local HTTP/D1 tests using distinct player credentials. Covers create/join, occupied seats, unauthorized reads, malformed credentials, out-of-turn/illegal/stale moves, simultaneous updates, refresh-style reads, draw consent, mutual rematch, and resignation.
@@ -35,3 +35,13 @@ These are not marked as passed by automated landmark tests.
 ## Deployment checks
 
 A private hosted deployment verifies build/runtime availability but does not grant a friend access. Site sharing and game room access are separate. Public exposure should follow a deliberate review of rate limits and retention. No cross-laptop or real-webcam claims should be inferred from the local two-tab test.
+
+## Phase 6 regression coverage
+Eleven additional tests cover stable hand identity when detection order changes, label jitter, one-hand pickup ownership, White/Black gesture sequences with all four hand combinations, practice orientation, reach mapping, blocked input, and safe cancellation when crossing hands makes identity ambiguous. These use synthetic pinch events; physical two-hand and crossing/occlusion checks remain manual.
+
+- [ ] Move White and Black using only one hand, then alternate hands.
+- [ ] Track both hands at once; lose the idle hand while the other carries a piece.
+- [ ] Cross hands and verify ambiguous tracking cancels safely rather than moves a piece.
+- [ ] Set transparency to 0%, 50%, and 100%; refresh and verify persistence.
+
+Browser verification for Phase 6: 0% and 100% slider endpoints checked; at 100% both square backgrounds compute to alpha 0. A 75% setting survives refresh. After e4, local practice rotates Black to the bottom. Settings panel visually inspected. Actual two-hand camera tracking still needs device testing.

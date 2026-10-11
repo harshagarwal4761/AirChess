@@ -8,6 +8,12 @@ import {
   projectPoint,
   type Point,
 } from "../lib/gestures";
+import {
+  matchHands,
+  reachablePoint,
+  type HandId,
+  type Observation,
+} from "../lib/air-controls";
 const connections = [
   [0, 1],
   [1, 2],
@@ -33,10 +39,16 @@ const connections = [
 ];
 export type AirEvent = {
   type: "grab" | "release" | "cancel";
+  handId: HandId;
   x: number;
   y: number;
 };
-export function useHandTracking(onEvent: (event: AirEvent) => void) {
+export function useHandTracking(
+  onEvent: (event: AirEvent) => void,
+  reachAssist = true,
+) {
+  const reachRef = useRef(reachAssist);
+  reachRef.current = reachAssist;
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
@@ -45,6 +57,7 @@ export function useHandTracking(onEvent: (event: AirEvent) => void) {
   >("off");
   const [error, setError] = useState("");
   const [fps, setFps] = useState(0);
+  const [handCount, setHandCount] = useState(0);
   const callback = useRef(onEvent);
   callback.current = onEvent;
   const resources = useRef<{
@@ -62,15 +75,19 @@ export function useHandTracking(onEvent: (event: AirEvent) => void) {
     r.model = undefined;
     r.stream = undefined;
     if (videoRef.current) videoRef.current.srcObject = null;
-    if (cursorRef.current) cursorRef.current.style.display = "none";
+    cursorRef.current
+      ?.querySelectorAll<HTMLElement>(".air-cursor")
+      .forEach((cursor) => (cursor.style.display = "none"));
     const canvas = canvasRef.current;
     canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     document
       .querySelectorAll(".air-dwell")
       .forEach((e) => e.classList.remove("air-dwell"));
-    callback.current({ type: "cancel", x: 0, y: 0 });
+    for (const handId of [0, 1] as const)
+      callback.current({ type: "cancel", handId, x: 0, y: 0 });
     setStatus("off");
     setFps(0);
+    setHandCount(0);
   }, []);
   useEffect(
     () => () => {
@@ -112,7 +129,7 @@ export function useHandTracking(onEvent: (event: AirEvent) => void) {
       const options = {
         baseOptions: { modelAssetPath: "/models/hand_landmarker.task" },
         runningMode: "VIDEO" as const,
-        numHands: 1,
+        numHands: 2,
         minHandDetectionConfidence: 0.6,
         minHandPresenceConfidence: 0.6,
         minTrackingConfidence: 0.65,
@@ -131,118 +148,190 @@ export function useHandTracking(onEvent: (event: AirEvent) => void) {
         return;
       }
       r.model = model;
-      let state = initialGesture(),
-        lastTime = -1,
+      const freshTrack = () => ({
+        state: initialGesture(),
+        observation: null as Observation | null,
+        lastSeen: 0,
+        smooth: null as Point | null,
+        dwell: null as HTMLElement | null,
+        dwellSince: 0,
+        fired: null as HTMLElement | null,
+      });
+      const tracks = [freshTrack(), freshTrack()];
+      let lastTime = -1,
         lastInference = 0,
-        lastSeen = 0,
-        smooth: Point | null = null;
-      let dwell: HTMLElement | null = null,
-        dwellSince = 0,
-        fired: HTMLElement | null = null,
-        lastStatus = "",
         count = 0,
-        fpsSince = performance.now();
-      const clearDwell = () => {
-        dwell?.classList.remove("air-dwell");
-        dwell = null;
+        fpsSince = performance.now(),
+        lastCount = -1;
+      const clickedAt = new WeakMap<HTMLElement, number>();
+      const resetTrack = (handId: HandId) => {
+        callback.current({ type: "cancel", handId, x: 0, y: 0 });
+        tracks[handId] = freshTrack();
       };
       const tick = (now: number) => {
         if (r.generation !== generation) return;
         r.frame = requestAnimationFrame(tick);
+        if (now - lastInference < 40) return;
+        // A stalled video or background tab must never retain a pickup.
         if (
-          now - lastInference < 40 ||
-          video.currentTime === lastTime ||
-          video.readyState < 2
-        )
+          document.hidden ||
+          video.readyState < 2 ||
+          video.currentTime === lastTime
+        ) {
+          if (now - lastInference > 180) {
+            for (const handId of [0, 1] as const) {
+              resetTrack(handId);
+            }
+            cursorRef.current
+              ?.querySelectorAll<HTMLElement>(".air-cursor")
+              .forEach((c) => (c.style.display = "none"));
+            document
+              .querySelectorAll(".air-dwell")
+              .forEach((e) => e.classList.remove("air-dwell"));
+          }
           return;
+        }
         lastInference = now;
         lastTime = video.currentTime;
         try {
           const result = model.detectForVideo(video, now);
-          const landmarks = document.hidden ? undefined : result.landmarks[0];
           const canvas = canvasRef.current!,
             context = canvas.getContext("2d")!;
-          if (canvas.width !== window.innerWidth)
-            canvas.width = window.innerWidth;
-          if (canvas.height !== window.innerHeight)
-            canvas.height = window.innerHeight;
+          if (canvas.width !== innerWidth) canvas.width = innerWidth;
+          if (canvas.height !== innerHeight) canvas.height = innerHeight;
           context.clearRect(0, 0, canvas.width, canvas.height);
-          const cursor = cursorRef.current!;
-          if (!landmarks) {
-            clearDwell();
-            fired = null;
-            cursor.style.display = "none";
-            if (now - lastSeen > 180) {
-              const next = advanceGesture(state, null, now);
-              state = next.state;
-              smooth = null;
-              callback.current({ type: "cancel", x: 0, y: 0 });
-            }
-            if (lastStatus !== "searching") {
-              setStatus("searching");
-              lastStatus = "searching";
-            }
-            return;
-          }
-          lastSeen = now;
-          if (lastStatus !== "tracking") {
-            setStatus("tracking");
-            lastStatus = "tracking";
-          }
-          const mapped = landmarks.map((p) =>
-            projectPoint(
-              p,
-              { width: video.videoWidth, height: video.videoHeight },
-              { width: canvas.width, height: canvas.height },
-            ),
+          for (const id of [0, 1] as const)
+            if (tracks[id].observation && now - tracks[id].lastSeen > 180)
+              resetTrack(id);
+          const observations = result.landmarks.map((points, i) => ({
+            wrist: points[0],
+            label: result.handedness[i]?.[0]?.categoryName ?? "",
+          }));
+          const matches = matchHands(
+            tracks.map((t) => t.observation),
+            observations,
           );
-          context.strokeStyle = "#b9ead480";
-          context.lineWidth = 2;
-          for (const [a, b] of connections) {
-            context.beginPath();
-            context.moveTo(mapped[a].x, mapped[a].y);
-            context.lineTo(mapped[b].x, mapped[b].y);
-            context.stroke();
+          if (observations.length && matches.every((index) => index === null)) {
+            resetTrack(0);
+            resetTrack(1);
           }
-          context.fillStyle = "#d4f6e5";
-          for (const p of mapped) {
-            context.beginPath();
-            context.arc(p.x, p.y, 3, 0, Math.PI * 2);
-            context.fill();
+          const trackedCount = matches.filter((index) => index !== null).length;
+          if (trackedCount !== lastCount) {
+            lastCount = trackedCount;
+            setHandCount(trackedCount);
+            setStatus(trackedCount ? "tracking" : "searching");
           }
-          const target = mapped[8];
-          smooth = smooth
-            ? {
-                x: smooth.x + (target.x - smooth.x) * 0.4,
-                y: smooth.y + (target.y - smooth.y) * 0.4,
-              }
-            : target;
-          cursor.style.display = "block";
-          cursor.style.transform = `translate(${smooth.x}px, ${smooth.y}px)`;
-          const next = advanceGesture(state, pinchRatio(landmarks), now);
-          state = next.state;
-          cursor.dataset.pinched = String(state.pinched);
-          if (next.event) callback.current({ type: next.event, ...smooth });
-          const element =
-            document
-              .elementFromPoint(smooth.x, smooth.y)
-              ?.closest<HTMLElement>("[data-air]") ?? null;
-          if (state.pinched || !state.armed || !element || element.matches(":disabled")) {
-            clearDwell();
-            if (!element) fired = null;
-          } else if (element !== dwell) {
-            clearDwell();
-            dwell = element;
-            dwellSince = now;
-            if (fired !== element) {
-              fired = null;
-              element.classList.add("air-dwell");
+          let didActivate = false;
+          for (const handId of [0, 1] as const) {
+            if (r.generation !== generation) return;
+            const index = matches[handId];
+            const cursor = cursorRef.current!.children[handId] as HTMLElement;
+            if (index === null) {
+              cursor.style.display = "none";
+              tracks[handId].dwell = null;
+              tracks[handId].fired = null;
+              continue;
             }
-          } else if (now - dwellSince > 1300 && fired !== element) {
-            fired = element;
-            clearDwell();
-            element.click();
+            const observation = observations[index];
+            const prev = tracks[handId].observation;
+            if (
+              prev &&
+              Math.hypot(
+                prev.wrist.x - observation.wrist.x,
+                prev.wrist.y - observation.wrist.y,
+              ) > 0.35
+            )
+              resetTrack(handId);
+            const track = tracks[handId],
+              landmarks = result.landmarks[index];
+            track.observation = observation;
+            track.lastSeen = now;
+            const mapped = landmarks.map((p) =>
+              projectPoint(
+                p,
+                { width: video.videoWidth, height: video.videoHeight },
+                { width: canvas.width, height: canvas.height },
+              ),
+            );
+            const color = handId === 0 ? "#bfead6" : "#efd0a8";
+            context.strokeStyle = color + "90";
+            context.lineWidth = 2;
+            for (const [a, b] of connections) {
+              context.beginPath();
+              context.moveTo(mapped[a].x, mapped[a].y);
+              context.lineTo(mapped[b].x, mapped[b].y);
+              context.stroke();
+            }
+            context.fillStyle = color;
+            for (const p of mapped) {
+              context.beginPath();
+              context.arc(p.x, p.y, 3, 0, Math.PI * 2);
+              context.fill();
+            }
+            const target = reachRef.current
+              ? reachablePoint(mapped[8], {
+                  width: canvas.width,
+                  height: canvas.height,
+                })
+              : mapped[8];
+            track.smooth = track.smooth
+              ? {
+                  x: track.smooth.x + (target.x - track.smooth.x) * 0.4,
+                  y: track.smooth.y + (target.y - track.smooth.y) * 0.4,
+                }
+              : target;
+            const pointer = track.smooth;
+            cursor.style.display = "block";
+            cursor.style.transform = `translate(${pointer.x}px, ${pointer.y}px)`;
+            const next = advanceGesture(
+              track.state,
+              pinchRatio(landmarks),
+              now,
+            );
+            track.state = next.state;
+            cursor.dataset.pinched = String(track.state.pinched);
+            if (next.event)
+              callback.current({ type: next.event, handId, ...pointer });
+            const element =
+              document
+                .elementFromPoint(pointer.x, pointer.y)
+                ?.closest<HTMLElement>("[data-air]") ?? null;
+            // Suppress menus while either hand is carrying a piece.
+            if (
+              tracks.some((t) => t.state.pinched) ||
+              !track.state.armed ||
+              !element ||
+              element.matches(":disabled")
+            ) {
+              track.dwell = null;
+              if (!element) track.fired = null;
+            } else if (element !== track.dwell) {
+              track.dwell = element;
+              track.dwellSince = now;
+              if (track.fired !== element) track.fired = null;
+            } else if (
+              !didActivate &&
+              now - track.dwellSince > 1300 &&
+              track.fired !== element &&
+              now - (clickedAt.get(element) ?? -Infinity) > 1600
+            ) {
+              track.fired = element;
+              track.dwell = null;
+              clickedAt.set(element, now);
+              didActivate = true;
+              element.click();
+            }
           }
+          const dwelling = new Set(
+            tracks
+              .filter((t) => t.dwell && t.fired !== t.dwell)
+              .map((t) => t.dwell),
+          );
+          document.querySelectorAll(".air-dwell").forEach((e) => {
+            if (!dwelling.has(e as HTMLElement))
+              e.classList.remove("air-dwell");
+          });
+          dwelling.forEach((e) => e?.classList.add("air-dwell"));
           count++;
           if (now - fpsSince > 1000) {
             setFps(Math.round((count * 1000) / (now - fpsSince)));
@@ -279,5 +368,15 @@ export function useHandTracking(onEvent: (event: AirEvent) => void) {
       );
     }
   }, [stop]);
-  return { videoRef, canvasRef, cursorRef, start, stop, status, error, fps };
+  return {
+    videoRef,
+    canvasRef,
+    cursorRef,
+    start,
+    stop,
+    status,
+    error,
+    fps,
+    handCount,
+  };
 }

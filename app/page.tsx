@@ -34,6 +34,12 @@ import {
 } from "../lib/game";
 import { useHandTracking, type AirEvent } from "../hooks/use-hand-tracking";
 
+import {
+  airBoardAction,
+  practiceOrientation,
+  type Pickup,
+} from "../lib/air-controls";
+
 type Room = {
   code: string;
   color: Color;
@@ -84,7 +90,9 @@ export default function AirChess() {
   const [connection, setConnection] = useState("");
   const [notice, setNotice] = useState("");
   const [muted, setMuted] = useState(false);
-  const [opacity, setOpacity] = useState(0.78);
+  const [opacity, setOpacity] = useState(0.42);
+  const [followTurn, setFollowTurn] = useState(true);
+  const [reachAssist, setReachAssist] = useState(true);
   const [flipped, setFlipped] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -92,12 +100,31 @@ export default function AirChess() {
   const keyRef = useRef("");
   const roomRef = useRef<Room | null>(null);
   const busyRef = useRef(false);
-  const grabbed = useRef<Square | null>(null);
+  const grabbed = useRef<Pickup>(null);
   const audioRef = useRef<AudioContext | null>(null);
   roomRef.current = room;
   const state = room?.state ?? local;
   const chess = useMemo(() => replay(state.moves), [state.moves]);
-  const orientation = room?.color ?? (flipped ? "b" : "w");
+  const orientation =
+    room?.color ?? practiceOrientation(chess.turn(), followTurn, flipped);
+  function changeOpacity(value: number) {
+    const clamped = Math.max(0, Math.min(1, Math.round(value * 100) / 100));
+    setOpacity(clamped);
+    try {
+      localStorage.setItem("airchess.opacity", String(clamped));
+    } catch {
+      /* Preference storage is optional. */
+    }
+  }
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("airchess.opacity");
+      if (saved !== null && Number.isFinite(Number(saved)))
+        setOpacity(Math.max(0, Math.min(1, Number(saved))));
+    } catch {
+      /* Use the default. */
+    }
+  }, []);
   const canMove =
     !state.result &&
     !busy &&
@@ -311,33 +338,27 @@ export default function AirChess() {
     else if (selected) move(selected, square);
   }
   const handleAir = (event: AirEvent) => {
-    if (event.type === "cancel") {
-      if (grabbed.current) setSelected(null);
-      grabbed.current = null;
-      return;
-    }
-    if (modal || promotion || !canMove) return;
-    const square = document
-      .elementFromPoint(event.x, event.y)
-      ?.closest<HTMLElement>("[data-square]")?.dataset.square as
-      | Square
-      | undefined;
-    if (
-      event.type === "grab" &&
-      square &&
-      chess.get(square)?.color === chess.turn()
-    ) {
-      grabbed.current = square;
-      setSelected(square);
-    }
-    if (event.type === "release") {
-      const from = grabbed.current;
-      grabbed.current = null;
-      if (from && square && square !== from) move(from, square);
-      else setSelected(null);
-    }
+    const square =
+      event.type === "cancel"
+        ? undefined
+        : (document
+            .elementFromPoint(event.x, event.y)
+            ?.closest<HTMLElement>("[data-square]")?.dataset.square as
+            | Square
+            | undefined);
+    const previous = grabbed.current;
+    const next = airBoardAction(
+      previous,
+      event,
+      square,
+      chess,
+      !modal && !promotion && canMove,
+    );
+    grabbed.current = next.pickup;
+    if (previous !== next.pickup) setSelected(next.pickup?.square ?? null);
+    if (next.move) move(next.move.from, next.move.to);
   };
-  const hand = useHandTracking(handleAir);
+  const hand = useHandTracking(handleAir, reachAssist);
   const cameraActive =
     hand.status === "tracking" || hand.status === "searching";
   useEffect(() => {
@@ -432,8 +453,8 @@ export default function AirChess() {
                   ? "Your friend"
                   : "An open seat"
               : bottom
-                ? "You · local practice"
-                : "Other side · local practice"}
+                ? "You control both colors"
+                : "You control both colors"}
           </strong>
           <span>
             {color === "w" ? "White pieces" : "Black pieces"}
@@ -472,8 +493,13 @@ export default function AirChess() {
       </div>
       <div className="camera-shade" />
       <canvas ref={hand.canvasRef} className="hand-canvas" aria-hidden="true" />
-      <div ref={hand.cursorRef} className="air-cursor" aria-hidden="true">
-        <span />
+      <div ref={hand.cursorRef} aria-hidden="true">
+        {[0, 1].map((id) => (
+          <div key={id} className={`air-cursor hand-${id}`}>
+            <span />
+            <b>{id + 1}</b>
+          </div>
+        ))}
       </div>
       <header className="topbar">
         <a className="brand" href="/" aria-label="AirChess home">
@@ -518,7 +544,7 @@ export default function AirChess() {
             <div className="session-label">
               <span className={room ? "tiny-dot" : "hollow-dot"} />
               {room ? `Room ${room.code}` : "Practice space"}
-              <small>{room ? connection : "Settle in. Try a few moves."}</small>
+              <small>{room ? connection : "Both colors · either hand"}</small>
             </div>
           </div>
           <div className="board-region">
@@ -568,7 +594,14 @@ export default function AirChess() {
                 className="icon-button"
                 data-air
                 aria-label={room ? "Export game as PGN" : "Flip board"}
-                onClick={room ? downloadPgn : () => setFlipped(!flipped)}
+                onClick={
+                  room
+                    ? downloadPgn
+                    : () => {
+                        setFollowTurn(false);
+                        setFlipped(orientation === "w");
+                      }
+                }
               >
                 {room ? <Download size={16} /> : <RotateCcw size={16} />}
               </button>
@@ -603,16 +636,16 @@ export default function AirChess() {
             </div>
             <h2>
               {hand.status === "tracking"
-                ? "You’re in control."
+                ? `${hand.handCount} ${hand.handCount === 1 ? "hand" : "hands"} in control.`
                 : cameraActive
-                  ? "Let’s see your hand."
+                  ? "Let’s see your hands."
                   : "A little wave. A new game."}
             </h2>
             <p>
               {hand.status === "tracking"
-                ? "Pinch a piece, move your hand, then release over a highlighted square."
+                ? "Use either cursor to pinch, move, and release. One piece at a time."
                 : cameraActive
-                  ? "Open one hand in front of your camera. Keep your fingertips in the frame."
+                  ? "Show one or both open hands. Either hand can play the current turn."
                   : "Turn on your camera and bring the board to life with your hands."}
             </p>
             <button
@@ -902,7 +935,7 @@ export default function AirChess() {
           }}
         >
           <section
-            className="modal"
+            className={`modal ${modal === "settings" ? "settings-modal" : ""}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="dialog-title"
@@ -1009,8 +1042,8 @@ export default function AirChess() {
                 <div className="help-steps">
                   <p>
                     <b>1. Set the scene.</b> Allow your camera, sit back
-                    slightly, and keep one open hand in good light. You’ll see
-                    the board over your camera view.
+                    slightly, and keep one or both open hands in good light.
+                    You’ll see the board over your camera view.
                   </p>
                   <p>
                     <b>2. Pick up a piece.</b> Move your index fingertip over
@@ -1029,9 +1062,11 @@ export default function AirChess() {
                   </p>
                 </div>
                 <div className="help-note">
-                  Local practice lets you play both sides. In a room, each
-                  laptop controls its own color. Casual games are untimed;
-                  repetition and fifty-move draws are automatic.
+                  Local practice lets either hand play both colors, and follows
+                  the active side by default. Reach assist brings far squares
+                  within a smaller hand movement. In a room, each laptop
+                  controls its own color. Casual games are untimed; repetition
+                  and fifty-move draws are automatic.
                 </div>
                 <button
                   className="button primary full"
@@ -1047,21 +1082,61 @@ export default function AirChess() {
                 <div className="eyebrow">MAKE IT YOUR SPACE</div>
                 <h2 id="dialog-title">A clearer view.</h2>
                 <p>Adjust the board to suit your room and lighting.</p>
-                <label className="setting-label">
-                  Board opacity <span>{Math.round(opacity * 100)}%</span>
+                <label className="setting-label" htmlFor="board-transparency">
+                  Board transparency{" "}
+                  <span>{Math.round((1 - opacity) * 100)}%</span>
                 </label>
-                <div className="button-row">
-                  {[0.45, 0.65, 0.78, 0.95].map((value) => (
+                <input
+                  id="board-transparency"
+                  className="transparency-slider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={Math.round((1 - opacity) * 100)}
+                  onChange={(e) =>
+                    changeOpacity(1 - Number(e.target.value) / 100)
+                  }
+                />
+                <div className="range-labels">
+                  <span>Solid board</span>
+                  <span>Clear board</span>
+                </div>
+                <div className="opacity-adjustments">
+                  {[-5, -1, 1, 5].map((step) => (
                     <button
-                      className={`button ${opacity === value ? "primary" : "secondary"}`}
-                      key={value}
+                      className="button secondary"
+                      key={step}
                       data-air
-                      onClick={() => setOpacity(value)}
+                      aria-label={`${step > 0 ? "Increase" : "Decrease"} transparency by ${Math.abs(step)} percent`}
+                      disabled={step > 0 ? opacity === 0 : opacity === 1}
+                      onClick={() => changeOpacity(opacity - step / 100)}
                     >
-                      {Math.round(value * 100)}%
+                      {step > 0 ? "+" : ""}
+                      {step}%
                     </button>
                   ))}
                 </div>
+                <p className="small-note">
+                  Use the slider or hover over the ± buttons. Pieces stay
+                  visible, even at 100% transparency. Your setting is saved.
+                </p>
+                <button
+                  className="button secondary full setting-button"
+                  data-air
+                  onClick={() => setReachAssist(!reachAssist)}
+                >
+                  Reach assist: {reachAssist ? "on" : "off"}
+                </button>
+                {!room && (
+                  <button
+                    className="button secondary full setting-button"
+                    data-air
+                    onClick={() => setFollowTurn(!followTurn)}
+                  >
+                    Follow active side: {followTurn ? "on" : "off"}
+                  </button>
+                )}
                 <button
                   className="button secondary full setting-button"
                   data-air

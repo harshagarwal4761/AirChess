@@ -67,3 +67,11 @@ Chess clocks with server time and timeout adjudication; Stockfish practice; reco
 - [ ] Measure accuracy, latency, and fatigue before making portfolio performance claims.
 
 These checks need physical hands and cameras. The automated and two-tab checks do not establish real-camera accuracy or cross-device performance. Future extensions remain deferred as listed above.
+
+## Phase 6 — hands and transparency (user feedback)
+- [x] Continuous 0–100% board transparency, lower default opacity, persistent preference, and gesture-accessible adjustments.
+- [x] Two simultaneously tracked hands with separate cursors, pinch states, and stable identities when detection order changes.
+- [x] Practice mode explicitly controls both colors; protect a pickup from the other hand and bring the active side within comfortable reach.
+- [x] Regression tests for both-color gesture moves, hand loss/reordering, and competing pickups; inspect controls and republish the existing private site.
+
+Verification: 25 automated tests pass. Browser checks cover transparency endpoints/persistence and turn-following. The latest production build/type check will run during packaging. Physical two-hand tracking remains a manual acceptance check.

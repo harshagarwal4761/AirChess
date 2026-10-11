@@ -15,9 +15,9 @@ flowchart LR
 
 ## Camera and gestures
 
-`use-hand-tracking.ts` acquires video without audio. Model and WebAssembly files are served locally by this app. Only one hand is tracked. Images are passed directly to local model inference and are not sent to any AirChess endpoint.
+`use-hand-tracking.ts` acquires video without audio. Model and WebAssembly files are served locally by this app. Up to two hands are tracked simultaneously. Each owns its own smoothing, pinch, and dwell state. Wrist proximity and handedness match detections to stable cursor IDs even when the model returns hands in a different order. A pickup belongs to its initiating hand; the other hand cannot release or cancel it. Images are passed directly to local model inference and are not sent to any AirChess endpoint.
 
-The camera is mirrored and fills the viewport with `object-fit: cover`. `projectPoint` accounts for the horizontal mirror and image cropping. It gives screen coordinates that match the displayed fingertip. An exponential smoother reduces cursor jitter.
+The camera is mirrored and fills the viewport with `object-fit: cover`. `projectPoint` accounts for the horizontal mirror and image cropping. It gives screen coordinates that match the displayed fingertip. Optional reach assist then maps the central 76% of that view to the full viewport; disable it for direct fingertip mapping. An exponential smoother reduces cursor jitter.
 
 Pinch distance is divided by palm width to reduce sensitivity to distance from the camera. Closing below 0.38 for 90 ms grabs; opening above 0.65 for 90 ms releases. This separate closing/opening threshold is called **hysteresis**: it prevents rapid toggles near a boundary. A newly detected hand must open before it can grab. Losing tracking for over 180 ms cancels a pickup and requires rearming.
 
@@ -47,3 +47,5 @@ The client polls approximately every 900 ms when visible and every 4 seconds whi
 ## Storage and limits
 
 D1 persists rooms through Worker restarts. Rooms become unavailable after seven days without a write. Expired rows are not yet physically purged. There is no matchmaking, spectator protocol, per-user rate limiter, or account recovery. Before a public launch these need explicit design. The initial hosted site is private and its hosting access policy is independent of game room membership.
+
+Local practice always uses the actual side to move, independent of hand identity or board orientation. Follow active side rotates the current color to the bottom. In online rooms the server still limits each player to their own color.
