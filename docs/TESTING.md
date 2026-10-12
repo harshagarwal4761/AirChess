@@ -2,7 +2,7 @@
 
 ## Automated
 
-- `npm test`: 31 tests for turn legality, castling, en passant, all promotion pieces, checkmate, stalemate, material/fifty-move/repetition draws, draw agreement, mutual rematch, resignation, pinch arming/hysteresis/stability/loss, mapping, and scale normalization.
+- `npm test`: 36 tests for turn legality, castling, en passant, all promotion pieces, checkmate, stalemate, material/fifty-move/repetition draws, draw agreement, mutual rematch, resignation, pinch arming/hysteresis/stability/loss, mapping, and scale normalization.
 - `npm run typecheck`: TypeScript compile validation.
 - `npm run build`: complete production Worker/client build.
 - `node tests/multiplayer.integration.mjs`: real local HTTP/D1 tests using distinct player credentials. Covers create/join, occupied seats, unauthorized reads, malformed credentials, out-of-turn/illegal/stale moves, simultaneous updates, refresh-style reads, draw consent, mutual rematch, and resignation.
@@ -39,10 +39,10 @@ A private hosted deployment verifies build/runtime availability but does not gra
 ## Earlier transparency/practice checks
 Browser verification: 0% and 100% slider endpoints checked; at 100% both square backgrounds compute to alpha 0. A 75% setting survives refresh. After e4, local practice rotates Black to the bottom.
 
-## Phase 7 regression coverage
+## Phase 7 regression coverage (historical; superseded by Phase 8)
 The current suite replaces the superseded two-independent-controller tests. It covers complete double-pinch confirmation, single pinch rejection, settling, target changes, fingertip curl, palm drift, tracking loss, timeout, long holds, square border exclusion, controller isolation, helper palm detection, camera aspect ratio, real pinch-edge sequences, practice orientation, and reach mapping, alongside chess legality tests.
 
-- [ ] Calibrate either hand; show the other and verify it only animates the selected piece/hints.
+- [ ] Historical animation behavior was replaced by second-hand pause in Phase 8.
 - [ ] Move White and Black in local practice with the same controller.
 - [ ] Cross/occlude hands and verify cancellation; record any handedness misclassification.
 - [ ] Aim at square borders or move the palm during confirmation: no adjacent square should be chosen.
@@ -52,3 +52,11 @@ The current suite replaces the superseded two-independent-controller tests. It c
 Actual physical gesture accuracy remains unverified. Automated landmark sequences cannot establish a zero-error interaction guarantee.
 
 Phase 7 software verification (12 October 2026): 31/31 tests and TypeScript validation pass; production build passes. A temporary local browser diagnostic loaded the actual model/WASM in the classic worker and completed blank-frame inference (zero hands), without accessing the webcam. Local UI checks verified White e4 and Black e5, both colors' eligible gesture targets, and the updated guide. No console errors appeared in those UI paths. The diagnostic page was removed before publication.
+
+## Phase 8: actual hook-to-board integration
+
+36 unit tests pass, including video-rectangle mapping, continuous pointer movement, hover timing, and repeat prevention. The local browser harness mounts the actual React page and `useHandTracking`, replacing only camera/model input. Twelve assertions passed: curled-thumb pointer alignment; intended White selection; no repeated selection; selection surviving detection loss; illegal destination rejection; White move; Black selection; second-hand pause preserving selection; resumed Black move; double-pinch source and destination with simulated fingertip curl; camera cleanup.
+
+To reproduce after `npm run build`: run `node scripts/build-gesture-qa.mjs`, start `npm start -- --port 5173`, open `/gesture-qa/`, and click **Run synthetic gesture checks**. This is an explicitly simulated local test, not a webcam accuracy measurement. Run a normal production build afterward to remove the diagnostic assets before packaging. No test route or model override is imported by the production app.
+
+Physical acceptance now starts with Steady hover: show one hand with thumb/index apart, confirm the cursor follows the visible fingertip, hold on a piece until the ring fills, then hold on a highlighted destination. Raise/lower a second open palm to pause/resume. Measure incorrect squares, missed selections, and latency under your actual lighting.

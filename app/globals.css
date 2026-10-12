@@ -1497,33 +1497,6 @@ h2 {
   border-color: #f8dfa6;
   box-shadow: 0 0 0 5px #f8dfa633;
 }
-.magic-hand .square.selected .piece {
-  animation: piece-float 1.5s ease-in-out infinite;
-  filter: drop-shadow(0 0 8px #f8dfa6);
-}
-.magic-hand .legal-marker {
-  animation: legal-glow 1.3s ease-in-out infinite;
-}
-@keyframes piece-float {
-  0%,
-  100% {
-    transform: translateY(-2px);
-  }
-  50% {
-    transform: translateY(-8px);
-  }
-}
-@keyframes legal-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 0 2px #f8dfa633;
-  }
-  50% {
-    box-shadow:
-      0 0 0 7px #f8dfa644,
-      0 0 15px #f8dfa666;
-  }
-}
 @media (min-width: 700px) and (max-height: 850px) {
   .immersive .panel {
     padding: 12px;
@@ -1544,3 +1517,12 @@ h2 {
     max-height: 55px;
   }
 }
+
+/* The cursor follows the finger; the square highlight shows the intended action. */
+.air-cursor::before { content: ""; position: absolute; left: -20px; top: -20px; width: 40px; height: 40px; border-radius: 50%; background: conic-gradient(#f8dfa6 var(--air-progress, 0deg), #ffffff18 0); mask: radial-gradient(transparent 60%, #000 62%); }
+.aim-modes { display: flex; margin-top: 12px; padding: 3px; gap: 4px; background: #07130b60; border: 1px solid #bfead622; border-radius: 8px; }
+.aim-modes button { flex: 1; border: 0; border-radius: 5px; padding: 8px 4px; font: inherit; font-size: 11px; color: #b7cabb; background: transparent; cursor: pointer; }
+.aim-modes button[aria-pressed="true"] { background: #bfead6; color: #162c20; }
+.aim-progress { height: 4px; border-radius: 3px; overflow: hidden; background: #bfead622; }
+.aim-progress span { display: block; height: 100%; background: #f8dfa6; transition: width 60ms linear; }
+.air-paused .board-shell { outline: 2px solid #f8dfa6; }

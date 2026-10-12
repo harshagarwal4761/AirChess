@@ -34,6 +34,7 @@ import {
 } from "../lib/game";
 import { useHandTracking, type AirEvent } from "../hooks/use-hand-tracking";
 
+import type { AimMode } from "../lib/air-pointer";
 import { practiceOrientation } from "../lib/air-controls";
 
 type Room = {
@@ -89,6 +90,7 @@ export default function AirChess() {
   const [opacity, setOpacity] = useState(0.42);
   const [followTurn, setFollowTurn] = useState(true);
   const [reachAssist, setReachAssist] = useState(false);
+  const [aimMode, setAimMode] = useState<AimMode>("hover");
   const [flipped, setFlipped] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -342,6 +344,7 @@ export default function AirChess() {
     handleAir,
     reachAssist,
     `${room?.code ?? "practice"}:${state.game}:${state.moves.length}:${selected}:${orientation}:${modal}:${Boolean(promotion)}:${canMove}`,
+    aimMode,
   );
   const cameraActive =
     hand.status === "tracking" || hand.status === "searching";
@@ -459,7 +462,7 @@ export default function AirChess() {
   }
   return (
     <main
-      className={`app ${cameraActive ? "camera-on" : ""} ${cameraActive || focusMode ? "immersive" : ""} ${hand.feedback.helper ? "magic-hand" : ""}`}
+      className={`app ${cameraActive ? "camera-on" : ""} ${cameraActive || focusMode ? "immersive" : ""} ${hand.feedback.helper ? "air-paused" : ""}`}
       style={{ "--board-opacity": opacity } as React.CSSProperties}
     >
       <video
@@ -638,7 +641,7 @@ export default function AirChess() {
             <p>
               {hand.status === "tracking"
                 ? hand.feedback.controllerReady
-                  ? "Pinch twice to select. Aim at a destination and pinch twice again."
+                  ? aimMode === "hover" ? "Point and hold for 1.1 seconds to select. Repeat on a highlighted destination." : "Pinch twice to select. Aim at a destination and pinch twice again."
                   : "Show only the hand you want to use, with your palm open for a moment."
                 : cameraActive
                   ? "Start with just one open hand. Add your other hand after the controller is set."
@@ -658,14 +661,16 @@ export default function AirChess() {
                   : "Enable air controls"}
               {!cameraActive && <ArrowUpRight size={17} />}
             </button>
+            <div className="aim-modes" role="group" aria-label="Move control mode">
+              <button data-air aria-pressed={aimMode === "hover"} onClick={() => setAimMode("hover")}>Steady hover</button>
+              <button data-air aria-pressed={aimMode === "double-pinch"} onClick={() => setAimMode("double-pinch")}>Double pinch</button>
+            </div>
             {cameraActive && (
               <div className="air-feedback" role="status">
                 <strong>{hand.feedback.message}</strong>
-                <span>
-                  {hand.feedback.helper
-                    ? "Magic hand active · legal moves glow"
-                    : "Second hand: open palm to illuminate your selected piece."}
-                </span>
+                <div className="aim-progress" role="progressbar" aria-label="Square confirmation" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(hand.feedback.progress * 100)}><span style={{ width: `${hand.feedback.progress * 100}%` }} /></div>
+                <span>{hand.fps} FPS · {hand.handCount} hand{hand.handCount === 1 ? "" : "s"} detected{aimMode === "double-pinch" ? ` · Pinch ${hand.feedback.pinched ? "closed" : "open"}` : ""}</span>
+                <span>{hand.feedback.helper ? "Controls paused · lower the second hand to resume" : "Second open palm pauses controls. Your selected piece is kept."}</span>
                 {selected && (
                   <button
                     className="text-button"
@@ -871,20 +876,20 @@ export default function AirChess() {
           <span className="step-number">01</span>
           <div>
             <strong>Aim & settle</strong>
-            <span>Wait for the square glow</span>
+            <span>Follow your index cursor</span>
           </div>
         </div>
         <div className="gesture-step">
           <span className="step-number">02</span>
           <div>
-            <strong>Double pinch</strong>
+            <strong>Hold to select</strong>
             <span>Select your piece</span>
           </div>
         </div>
         <div className="gesture-step">
           <span className="step-number">03</span>
           <div>
-            <strong>Double pinch again</strong>
+            <strong>Hold to move</strong>
             <span>Confirm the destination</span>
           </div>
         </div>
@@ -1061,17 +1066,15 @@ export default function AirChess() {
                     hand never selects squares.
                   </p>
                   <p>
-                    <b>2. Select deliberately.</b> Aim at the center of your
-                    piece and wait for its square to glow. Pinch and open twice,
-                    keeping your palm still. The first pinch locks the target;
-                    the second selects it.
+                    <b>2. Select your piece.</b> Point at your piece and keep the
+                    cursor inside its square until the ring fills (1.1 seconds).
+                    Steady hover needs no pinching. Move away to cancel the countdown.
                   </p>
                   <p>
-                    <b>3. Confirm the destination.</b> Move your open hand to a
-                    legal destination. Wait for its glow and pinch/open twice
-                    again. Drifting, losing tracking, or waiting too long
-                    cancels the attempt. An open second palm animates the
-                    selected piece and legal squares.
+                    <b>3. Choose the destination.</b> Move to a highlighted legal
+                    square and hold again. Raise your second open palm to pause;
+                    lower it to resume. A tracking interruption keeps your selected
+                    piece, but restarts the confirmation countdown.
                   </p>
                   <p>
                     <b>4. Use the menus.</b> Hold an open fingertip over a
@@ -1081,7 +1084,7 @@ export default function AirChess() {
                   </p>
                 </div>
                 <div className="help-note">
-                  Your control hand plays both colors in local practice, which
+                  Double pinch is also available in the Air controls panel: close/open twice on the piece, then twice on its destination. Your control hand plays both colors in local practice, which
                   follows the active side by default. Reach assist brings far
                   squares within a smaller hand movement. In a room, each laptop
                   controls its own color. Casual games are untimed; repetition
@@ -1157,7 +1160,7 @@ export default function AirChess() {
                   data-air
                   onClick={() => setReachAssist(!reachAssist)}
                 >
-                  Reach assist: {reachAssist ? "on" : "off"}
+                  Expanded reach: {reachAssist ? "on · cursor offset" : "off · direct aim"}
                 </button>
                 {!room && (
                   <button

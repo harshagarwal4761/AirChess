@@ -47,10 +47,10 @@ export function stepDoublePinch(
   if (now < s.cooldown) return { state: s, confirmed: null, cancelled: false };
   if (s.locked) {
     if (
-      now - s.started > 2200 ||
+      now - s.started > 3500 ||
       Math.hypot(palm.x - s.anchor!.x, palm.y - s.anchor!.y) >
-        s.locked.size * 0.32 ||
-      (s.closing && now - s.closedAt > 800)
+        Math.max(24, s.locked.size * 0.65) ||
+      (s.closing && now - s.closedAt > 1500)
     )
       return cancel();
     if (edge === "grab") {
@@ -82,10 +82,9 @@ export function stepDoublePinch(
     if (
       !s.hover ||
       !s.hoverPalm ||
-      now - s.hoverSince < 320 ||
-      target?.square !== s.hover.square ||
+      now - s.hoverSince < 160 ||
       Math.hypot(palm.x - s.hoverPalm.x, palm.y - s.hoverPalm.y) >
-        s.hover.size * 0.32
+        Math.max(24, s.hover.size * 0.65)
     )
       return cancel();
     s = {
@@ -105,7 +104,7 @@ export function centerTarget(
   rect: { left: number; top: number; width: number; height: number },
   point: Point,
 ): Target | null {
-  const margin = 0.18;
+  const margin = 0.06;
   if (
     point.x < rect.left + rect.width * margin ||
     point.x > rect.left + rect.width * (1 - margin) ||

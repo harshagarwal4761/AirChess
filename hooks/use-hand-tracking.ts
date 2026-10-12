@@ -4,9 +4,9 @@ import {
   advanceGesture,
   initialGesture,
   pinchRatio,
-  projectPoint,
   type Point,
 } from "../lib/gestures";
+import { cameraPoint, followPointer, hoverSelect, newHover, type AimMode, type PointerState } from "../lib/air-pointer";
 import { reachablePoint } from "../lib/air-controls";
 import {
   centerTarget,
@@ -24,6 +24,8 @@ type Feedback = {
   locked: boolean;
   controllerReady: boolean;
   helper: boolean;
+  progress: number;
+  pinched: boolean;
   message: string;
 };
 const idleFeedback: Feedback = {
@@ -33,6 +35,8 @@ const idleFeedback: Feedback = {
   locked: false,
   controllerReady: false,
   helper: false,
+  progress: 0,
+  pinched: false,
   message: "Show only your control hand, open, to begin.",
 };
 const connections = [
@@ -62,6 +66,7 @@ export function useHandTracking(
   onEvent: (event: AirEvent) => void,
   reachAssist = false,
   interactionKey = "",
+  mode: AimMode = "hover",
 ) {
   const videoRef = useRef<HTMLVideoElement>(null),
     canvasRef = useRef<HTMLCanvasElement>(null),
@@ -75,19 +80,21 @@ export function useHandTracking(
     [feedback, setFeedback] = useState<Feedback>(idleFeedback);
   const callback = useRef(onEvent);
   callback.current = onEvent;
-  const options = useRef({ reachAssist, interactionKey });
-  options.current = { reachAssist, interactionKey };
+  const options = useRef({ reachAssist, interactionKey, mode });
+  options.current = { reachAssist, interactionKey, mode };
   const resources = useRef<{
     worker?: Worker;
     stream?: MediaStream;
     frame?: number;
     generation: number;
     recalibrate?: () => void;
+    timeout?: ReturnType<typeof setTimeout>;
   }>({ generation: 0 });
   const stop = useCallback(() => {
     const r = resources.current;
     r.generation++;
     if (r.frame) cancelAnimationFrame(r.frame);
+    clearTimeout(r.timeout);
     r.worker?.terminate();
     r.stream?.getTracks().forEach((t) => t.stop());
     r.worker = undefined;
@@ -148,14 +155,15 @@ export function useHandTracking(
       r.worker = worker;
       let state = initialGesture(),
         sequence = newDoublePinch(),
-        smooth: Point | null = null,
+        pointerState: PointerState = null,
+        hover = newHover(),
         controller: string | null = null;
       let calibrationLabel = "",
         calibrationSince = 0,
-        helperSince = 0,
-        hadController = false,
+        helperLastSeen = -Infinity,
+        paused = false,
         lastPalm: Point | null = null;
-      let lastKey = options.current.interactionKey,
+      let lastKey = options.current.interactionKey + options.current.mode,
         lastSeen = 0,
         lastInference = 0,
         lastVideo = -1,
@@ -181,15 +189,16 @@ export function useHandTracking(
       const clearAttempt = (cancelSelection = false) => {
         state = initialGesture();
         sequence = newDoublePinch();
-        smooth = null;
+        pointerState = null;
+        hover = newHover(hover.blocked);
         lastPalm = null;
         clearDwell();
         fired = null;
         if (cancelSelection) callback.current({ type: "cancel" });
       };
       const lose = () => {
-        clearAttempt(hadController);
-        hadController = false;
+        // Detection dropouts cancel pending input, never the selected chess piece.
+        clearAttempt();
         const cursor = cursorRef.current?.children[0] as
           | HTMLElement
           | undefined;
@@ -209,7 +218,7 @@ export function useHandTracking(
         clearAttempt(true);
         publish(idleFeedback);
       };
-      const timeout = setTimeout(() => {
+      const timeout = r.timeout = setTimeout(() => {
         if (!ready)
           fail(
             "The hand model took too long to load. Check your connection and restart the camera.",
@@ -237,12 +246,17 @@ export function useHandTracking(
         }
         if (data.type !== "result") return;
         inFlight = false;
-        if (document.hidden || performance.now() - data.timestamp > 400) {
+        if (document.hidden || performance.now() - data.timestamp > 750) {
           lose();
           return;
         }
         const now = performance.now();
         lastSeen = now;
+        count++;
+        if (now - fpsSince > 1000) {
+          setFps(Math.round((count * 1000) / (now - fpsSince)));
+          fpsSince = now; count = 0;
+        }
         const landmarks = data.landmarks as Point[][],
           labels = (data.handedness as { categoryName: string }[][]).map(
             (h) => h[0]?.categoryName ?? "",
@@ -251,15 +265,16 @@ export function useHandTracking(
         setStatus(landmarks.length ? "tracking" : "searching");
         const canvas = canvasRef.current!,
           ctx = canvas.getContext("2d")!;
-        if (canvas.width !== innerWidth) canvas.width = innerWidth;
+        if (canvas.width !== document.documentElement.clientWidth) canvas.width = document.documentElement.clientWidth;
         if (canvas.height !== innerHeight) canvas.height = innerHeight;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const videoRect = video.getBoundingClientRect();
         const mapped = landmarks.map((hand) =>
           hand.map((p) =>
-            projectPoint(
+            cameraPoint(
               p,
               { width: video.videoWidth, height: video.videoHeight },
-              { width: canvas.width, height: canvas.height },
+              videoRect,
             ),
           ),
         );
@@ -267,14 +282,13 @@ export function useHandTracking(
           if (
             landmarks.length === 1 &&
             labels[0] &&
-            openPalm(mapped[0]) &&
             pinchRatio(landmarks[0], video.videoWidth / video.videoHeight) >
               0.65
           ) {
             if (calibrationLabel !== labels[0]) {
               calibrationLabel = labels[0];
               calibrationSince = now;
-            } else if (now - calibrationSince >= 500) {
+            } else if (now - calibrationSince >= 300) {
               controller = labels[0];
               clearAttempt();
             }
@@ -301,14 +315,21 @@ export function useHandTracking(
         const helperOpen = mapped.some(
           (points, i) => i !== primary && openPalm(points),
         );
-        if (!helperOpen) helperSince = 0;
-        else if (!helperSince) helperSince = now;
-        const helper = helperOpen && now - helperSince > 250;
-        if (lastKey !== options.current.interactionKey) {
-          lastKey = options.current.interactionKey;
+        if (helperOpen) helperLastSeen = now;
+        const helper = now - helperLastSeen < 350;
+        if (helper) {
+          if (!paused) clearAttempt();
+          paused = true;
+          const cursor = cursorRef.current?.children[0] as HTMLElement | undefined;
+          if (cursor) cursor.style.display = "none";
+          publish({ ...idleFeedback, controllerReady: true, helper: true, message: "Paused by your second hand. Lower it to resume." });
+          return;
+        }
+        if (paused) { paused = false; clearAttempt(); }
+        if (lastKey !== options.current.interactionKey + options.current.mode) {
+          lastKey = options.current.interactionKey + options.current.mode;
           clearAttempt();
         }
-        hadController = true;
         const points = mapped[primary],
           palm = palmPoint(points);
         if (
@@ -330,16 +351,9 @@ export function useHandTracking(
               height: canvas.height,
             })
           : points[8];
-        // Only steer with fingers open. Pinch curl must not move the aim point.
-        if (!smooth) smooth = raw;
-        else if (ratio > 0.65 && !sequence.locked) {
-          const alpha = 0.3;
-          smooth = {
-            x: smooth.x + (raw.x - smooth.x) * alpha,
-            y: smooth.y + (raw.y - smooth.y) * alpha,
-          };
-        }
-        const pointer = smooth;
+        // A curled thumb must not freeze the cursor. Aim always follows the index.
+        pointerState = followPointer(pointerState, raw, now);
+        const pointer = pointerState!.point;
         const element = document
           .elementFromPoint(pointer.x, pointer.y)
           ?.closest<HTMLElement>("[data-air-square]");
@@ -353,42 +367,45 @@ export function useHandTracking(
         const next = advanceGesture(state, ratio, now);
         state = next.state;
         const stepped = stepDoublePinch(sequence, {
-          now,
-          target,
-          palm,
-          edge: next.event,
-          visible: true,
-          open: ratio > 0.65 && !state.pinched,
+          now, target, palm, edge: next.event, visible: true,
+          // Retain the pre-pinch target while the fingertip curls, not the cursor.
+          open: ratio > 0.65 && !state.pinched && !state.candidate,
         });
         sequence = stepped.state;
-        const display = sequence.locked ?? pointer;
+        const hovering = hoverSelect(hover, target, now);
+        hover = hovering.state;
+        const isHover = options.current.mode === "hover";
+        const confirmed = isHover ? hovering.confirmed : stepped.confirmed;
+        const progress = isHover ? hovering.progress : sequence.count / 2;
+        const aim = isHover ? target : sequence.locked ?? sequence.hover;
         const cursor = cursorRef.current!.children[0] as HTMLElement;
         cursor.style.display = "block";
-        cursor.style.transform = `translate(${display.x}px,${display.y}px)`;
+        cursor.style.transform = `translate(${pointer.x}px,${pointer.y}px)`;
         cursor.dataset.pinched = String(state.pinched);
         cursor.dataset.progress = String(sequence.count);
-        const stable = Boolean(
-          sequence.hover && now - sequence.hoverSince >= 320,
-        );
+        cursor.style.setProperty("--air-progress", `${progress * 360}deg`);
+        const stable = Boolean(sequence.hover && now - sequence.hoverSince >= 160);
         publish({
-          target: sequence.locked?.square ?? sequence.hover?.square ?? null,
-          count: sequence.count,
-          ready: stable,
-          locked: Boolean(sequence.locked),
-          controllerReady: true,
-          helper,
-          message: stepped.cancelled
-            ? "Aim moved — try again."
-            : sequence.locked
-              ? `${sequence.locked.square}: ${sequence.count}/2 pinches. Keep your hand still.`
-              : stable
-                ? `${sequence.hover!.square} ready — pinch twice.`
-                : "Aim at the center of a piece or highlighted destination.",
+          target: aim?.square ?? null,
+          count: isHover ? 0 : sequence.count,
+          ready: isHover ? Boolean(target) : stable,
+          locked: !isHover && Boolean(sequence.locked),
+          controllerReady: true, helper: false,
+          progress: Math.round(progress * 20) / 20, pinched: state.pinched,
+          message: confirmed ? `${confirmed} confirmed. Move to your next square.`
+            : isHover
+              ? target ? hover.blocked === target.square
+                ? "Selected. Move to a highlighted destination."
+                : `Hold on ${target.square} · ${Math.round(progress * 100)}%`
+                : "Point at a piece, then hold for the ring to fill."
+              : stepped.cancelled ? "Attempt cancelled. Aim and try again."
+                : sequence.locked ? `${sequence.locked.square}: ${sequence.count}/2 pinches. Open between pinches.`
+                : stable ? `${sequence.hover!.square} ready — pinch twice.`
+                : "Point at a piece or highlighted destination, then pinch twice.",
         });
-        if (stepped.confirmed) {
-          clearDwell();
-          fired = null;
-          callback.current({ type: "confirm", square: stepped.confirmed });
+        if (confirmed) {
+          clearDwell(); fired = null;
+          callback.current({ type: "confirm", square: confirmed });
           return;
         }
         const button =
@@ -396,10 +413,7 @@ export function useHandTracking(
             .elementFromPoint(pointer.x, pointer.y)
             ?.closest<HTMLElement>("[data-air]") ?? null;
         if (
-          state.pinched ||
-          ratio < 0.65 ||
-          sequence.locked ||
-          !state.armed ||
+          (!isHover && (state.pinched || state.candidate || Boolean(sequence.locked))) ||
           !button ||
           button.matches(":disabled")
         ) {
@@ -418,12 +432,6 @@ export function useHandTracking(
           clearDwell();
           button.click();
         }
-        count++;
-        if (now - fpsSince > 1000) {
-          setFps(Math.round((count * 1000) / (now - fpsSince)));
-          fpsSince = now;
-          count = 0;
-        }
       };
       worker.postMessage({ type: "init", origin: location.origin });
       const tick = (now: number) => {
@@ -432,7 +440,7 @@ export function useHandTracking(
           return;
         }
         r.frame = requestAnimationFrame(tick);
-        if (lastSeen && now - lastSeen > 400) {
+        if (lastSeen && now - lastSeen > 750) {
           lose();
           lastSeen = 0;
         }

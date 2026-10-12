@@ -84,3 +84,14 @@ Verification: 25 automated tests pass. Browser checks cover transparency endpoin
 - [x] Test gesture sequences, wrong-square guards, role isolation, and build/browser behavior; prepare the existing site for publication.
 
 Verification: 31 tests, typecheck, production build, actual worker/model blank-frame inference, and both-color UI targeting pass. Physical camera accuracy and a complete two-laptop gesture game remain human acceptance checks. Publication follows the final package check.
+
+## Phase 8 — repair unusable aiming and selection
+- [x] Map to the actual video rectangle and remove pinch-dependent pointer freezing; use time-based smoothing.
+- [x] Add steady-hover selection with countdown and repeat protection; retain a more forgiving double-pinch option.
+- [x] Preserve the selected piece across tracking interruptions while resetting incomplete confirmations.
+- [x] Replace second-hand animations with an open-palm pause; expose useful tracking feedback.
+- [x] Verify the actual hook-to-board path with simulated camera frames, gesture regressions, and browser checks; prepare publication and GitHub synchronization.
+
+Physical webcam accuracy still requires user testing. Synthetic input should exercise the production interaction path rather than only isolated functions.
+
+Phase 8 checks: 36 unit tests, TypeScript validation, production build, and 12 browser integration assertions pass. Actual camera performance remains a user/device acceptance check.

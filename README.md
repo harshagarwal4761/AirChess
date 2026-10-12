@@ -1,6 +1,6 @@
 # AirChess
 
-**Your next move. In the air.** A webcam chess app with double-pinch controls, a translucent camera overlay, and online rooms for two players.
+**Your next move. In the air.** A webcam chess app with steady-hover and double-pinch controls, a translucent camera overlay, and online rooms for two players.
 
 This is a computer-vision application, not a physical hologram. You look at the screen and move your hand in front of the webcam. MediaPipe's pretrained model runs locally in the browser; your camera frames are never uploaded by AirChess.
 
@@ -31,8 +31,8 @@ For an existing checkout with dependencies and the database prepared, run `npm r
 
 1. Try a few moves by clicking a piece and a highlighted destination.
 2. Click **Enable air controls**, then allow camera access. Use a regular desktop browser if the embedded preview cannot open your camera.
-3. Show only your chosen control hand with its palm open until calibrated. Aim at the center of a piece until its square is marked ready. Close and reopen thumb/index twice to select it; aim at a highlighted destination and repeat. Keep your palm still through each double pinch.
-4. Optional: open your second palm to make the selected piece float and its legal destinations glow. This hand never selects pieces.
+3. Show only your chosen control hand with your thumb and index apart until calibrated. In **Steady hover** mode, point at a piece and hold the cursor in its square for 1.1 seconds until the ring fills. Move to a highlighted destination and hold again. Moving away cancels the countdown.
+4. Optional: raise your second open palm to pause all gesture input. Lower it to resume. The selected piece is kept. **Double pinch** remains available in the Air controls panel: close/open twice on the piece, then twice on its destination.
 5. Hold an open fingertip over a button for 1.3 seconds to activate it. A border shows the dwell timer. Move away before activating that button again.
 6. Create a room and share its link or six-digit code. Your friend joins from their laptop and plays Black. Their camera is independent of yours.
 
@@ -87,9 +87,13 @@ Describe this as **a gesture-controlled multiplayer chess application using a pr
 
 Built with React, TypeScript, Vinext/Vite, Cloudflare D1, chess.js, and MediaPipe. See [THIRD_PARTY.md](docs/THIRD_PARTY.md) for sources. The project is a portfolio prototype, not a hardened public chess service: before opening anonymous access widely, add per-client rate limits, room cleanup, stronger seat recovery, observability, and device testing.
 
-### Two-hand roles and accuracy guards
-One calibrated hand controls moves and menus. The second open palm activates a visual effect only. Use **Settings → Choose control hand again** to switch the controller. Loss or ambiguous handedness cancels input; the helper is never deliberately promoted to controller.
+### Aiming, selection, and the second hand
+One calibrated hand controls moves and menus. Its index cursor follows continuously, even if the thumb is curled. The cursor is mapped to the actual mirrored video rectangle, with time-based smoothing. Expanded reach is off by default because it intentionally offsets the cursor from the visible fingertip.
 
-Aim inside the central 64% of a square for 320 ms. The first pinch locks that square; complete two close/open cycles within 2.2 seconds. Excessive palm drift, long holds, or tracking loss cancels the attempt. The aim cursor freezes while pinching so fingertip curl cannot switch squares. Watch the coordinate and 1/2 confirmation indicator. These guards reduce mistakes, but physical testing is still needed; no webcam system can promise zero wrong selections.
+Steady hover is the default: remain inside an eligible square for 1.1 seconds to confirm. A ring and progress bar show the countdown. Leaving the square resets it. The activated square stays latched until you leave, preventing repeated selection. Tracking loss resets the countdown without dropping the selected chess piece. Only current-turn pieces and legal destinations can be confirmed.
 
-Settings includes optional Reach assist (off by default), Follow active side for local practice, and saved board transparency. Local practice allows the same controller to play White and Black.
+Double pinch is optional. Aim inside the central 88% of a square for 160 ms before two complete close/open cycles. The pre-pinch square locks while the cursor continues following your finger. Complete both cycles within 3.5 seconds; holding a pinch longer than 1.5 seconds or moving the palm too far cancels. Watch the highlighted coordinate and confirmation count.
+
+The second open palm pauses gesture input immediately and resumes 350 ms after it is lowered. Use **Settings → Choose control hand again** to switch the controller. Local practice lets the same control hand play both colors. Saved board transparency remains available.
+
+Synthetic integration tests exercise the actual React page and hook, but cannot establish webcam accuracy across users. No claim of zero incorrect selections is made.

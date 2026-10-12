@@ -13,9 +13,9 @@ self.onmessage = async (event: MessageEvent) => {
         },
         runningMode: "VIDEO" as const,
         numHands: 2,
-        minHandDetectionConfidence: 0.65,
-        minHandPresenceConfidence: 0.65,
-        minTrackingConfidence: 0.7,
+        minHandDetectionConfidence: 0.5,
+        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
       };
       try {
         model = await HandLandmarker.createFromOptions(files, {

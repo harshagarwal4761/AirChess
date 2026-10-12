@@ -71,7 +71,7 @@ test("first pinch locks the displayed target despite fingertip curl", () => {
 test("moving the palm to a neighboring square cancels instead of retargeting", () => {
   const run = harness();
   firstPinch(run);
-  const n = run({ now: 800, palm: { x: 100, y: 120 }, target: b });
+  const n = run({ now: 800, palm: { x: 125, y: 120 }, target: b });
   assert.equal(n.cancelled, true);
   assert.equal(n.state.locked, null);
   assert.equal(run({ now: 1000, edge: "release", target: b }).confirmed, null);
@@ -95,14 +95,14 @@ test("tracking loss clears a half-finished sequence", () => {
 test("timeout clears stale first pinch", () => {
   const run = harness();
   firstPinch(run);
-  assert.equal(run({ now: 2800 }).cancelled, true);
+  assert.equal(run({ now: 4100 }).cancelled, true);
 });
 test("holding a pinch does not count as repeated pinches", () => {
   const run = harness();
   run({ now: 0 });
   run({ now: 400 });
   run({ now: 500, edge: "grab", open: false });
-  assert.equal(run({ now: 1400, open: false }).cancelled, true);
+  assert.equal(run({ now: 2100, open: false }).cancelled, true);
 });
 test("center targeting rejects square borders rather than snapping to a neighbor", () => {
   const rect = { left: 0, top: 0, width: 100, height: 100 };
