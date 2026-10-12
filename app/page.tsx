@@ -34,11 +34,7 @@ import {
 } from "../lib/game";
 import { useHandTracking, type AirEvent } from "../hooks/use-hand-tracking";
 
-import {
-  airBoardAction,
-  practiceOrientation,
-  type Pickup,
-} from "../lib/air-controls";
+import { practiceOrientation } from "../lib/air-controls";
 
 type Room = {
   code: string;
@@ -92,7 +88,7 @@ export default function AirChess() {
   const [muted, setMuted] = useState(false);
   const [opacity, setOpacity] = useState(0.42);
   const [followTurn, setFollowTurn] = useState(true);
-  const [reachAssist, setReachAssist] = useState(true);
+  const [reachAssist, setReachAssist] = useState(false);
   const [flipped, setFlipped] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -100,7 +96,6 @@ export default function AirChess() {
   const keyRef = useRef("");
   const roomRef = useRef<Room | null>(null);
   const busyRef = useRef(false);
-  const grabbed = useRef<Pickup>(null);
   const audioRef = useRef<AudioContext | null>(null);
   roomRef.current = room;
   const state = room?.state ?? local;
@@ -264,7 +259,6 @@ export default function AirChess() {
   useEffect(() => {
     setSelected(null);
     setPromotion(null);
-    grabbed.current = null;
   }, [room?.code, state.moves.length, state.game]);
   async function connect(kind: "create" | "join") {
     if (busyRef.current) return;
@@ -338,27 +332,17 @@ export default function AirChess() {
     else if (selected) move(selected, square);
   }
   const handleAir = (event: AirEvent) => {
-    const square =
-      event.type === "cancel"
-        ? undefined
-        : (document
-            .elementFromPoint(event.x, event.y)
-            ?.closest<HTMLElement>("[data-square]")?.dataset.square as
-            | Square
-            | undefined);
-    const previous = grabbed.current;
-    const next = airBoardAction(
-      previous,
-      event,
-      square,
-      chess,
-      !modal && !promotion && canMove,
-    );
-    grabbed.current = next.pickup;
-    if (previous !== next.pickup) setSelected(next.pickup?.square ?? null);
-    if (next.move) move(next.move.from, next.move.to);
+    if (event.type === "cancel") {
+      setSelected(null);
+      return;
+    }
+    if (!modal && !promotion && canMove) squareClick(event.square as Square);
   };
-  const hand = useHandTracking(handleAir, reachAssist);
+  const hand = useHandTracking(
+    handleAir,
+    reachAssist,
+    `${room?.code ?? "practice"}:${state.game}:${state.moves.length}:${selected}:${orientation}:${modal}:${Boolean(promotion)}:${canMove}`,
+  );
   const cameraActive =
     hand.status === "tracking" || hand.status === "searching";
   useEffect(() => {
@@ -475,7 +459,7 @@ export default function AirChess() {
   }
   return (
     <main
-      className={`app ${cameraActive ? "camera-on" : ""} ${cameraActive || focusMode ? "immersive" : ""}`}
+      className={`app ${cameraActive ? "camera-on" : ""} ${cameraActive || focusMode ? "immersive" : ""} ${hand.feedback.helper ? "magic-hand" : ""}`}
       style={{ "--board-opacity": opacity } as React.CSSProperties}
     >
       <video
@@ -494,12 +478,10 @@ export default function AirChess() {
       <div className="camera-shade" />
       <canvas ref={hand.canvasRef} className="hand-canvas" aria-hidden="true" />
       <div ref={hand.cursorRef} aria-hidden="true">
-        {[0, 1].map((id) => (
-          <div key={id} className={`air-cursor hand-${id}`}>
-            <span />
-            <b>{id + 1}</b>
-          </div>
-        ))}
+        <div className="air-cursor hand-0">
+          <span />
+          <b>Move</b>
+        </div>
       </div>
       <header className="topbar">
         <a className="brand" href="/" aria-label="AirChess home">
@@ -544,7 +526,9 @@ export default function AirChess() {
             <div className="session-label">
               <span className={room ? "tiny-dot" : "hollow-dot"} />
               {room ? `Room ${room.code}` : "Practice space"}
-              <small>{room ? connection : "Both colors · either hand"}</small>
+              <small>
+                {room ? connection : "Both colors · one controller"}
+              </small>
             </div>
           </div>
           <div className="board-region">
@@ -564,7 +548,15 @@ export default function AirChess() {
                     <button
                       key={square}
                       data-square={square}
-                      className={`square ${(Math.floor(i / 8) + (i % 8)) % 2 ? "dark" : "light"} ${selected === square ? "selected" : ""} ${lastMove?.from === square || lastMove?.to === square ? "last-move" : ""} ${check ? "in-check" : ""}`}
+                      data-air-square={
+                        !modal &&
+                        !promotion &&
+                        canMove &&
+                        (piece?.color === chess.turn() || isLegal)
+                          ? square
+                          : undefined
+                      }
+                      className={`square ${(Math.floor(i / 8) + (i % 8)) % 2 ? "dark" : "light"} ${selected === square ? "selected" : ""} ${lastMove?.from === square || lastMove?.to === square ? "last-move" : ""} ${check ? "in-check" : ""} ${hand.feedback.target === square ? "air-target" : ""} ${hand.feedback.target === square && hand.feedback.locked ? "air-locked" : ""}`}
                       aria-label={`${square}${piece ? ` ${piece.color === "w" ? "white" : "black"} ${pieceNames[piece.type]}` : " empty"}${isLegal ? ", legal destination" : ""}`}
                       aria-pressed={selected === square}
                       onClick={() => squareClick(square)}
@@ -636,16 +628,20 @@ export default function AirChess() {
             </div>
             <h2>
               {hand.status === "tracking"
-                ? `${hand.handCount} ${hand.handCount === 1 ? "hand" : "hands"} in control.`
+                ? hand.feedback.controllerReady
+                  ? "One hand. Deliberate moves."
+                  : "Choose your control hand."
                 : cameraActive
-                  ? "Let’s see your hands."
+                  ? "Choose your control hand."
                   : "A little wave. A new game."}
             </h2>
             <p>
               {hand.status === "tracking"
-                ? "Use either cursor to pinch, move, and release. One piece at a time."
+                ? hand.feedback.controllerReady
+                  ? "Pinch twice to select. Aim at a destination and pinch twice again."
+                  : "Show only the hand you want to use, with your palm open for a moment."
                 : cameraActive
-                  ? "Show one or both open hands. Either hand can play the current turn."
+                  ? "Start with just one open hand. Add your other hand after the controller is set."
                   : "Turn on your camera and bring the board to life with your hands."}
             </p>
             <button
@@ -662,6 +658,25 @@ export default function AirChess() {
                   : "Enable air controls"}
               {!cameraActive && <ArrowUpRight size={17} />}
             </button>
+            {cameraActive && (
+              <div className="air-feedback" role="status">
+                <strong>{hand.feedback.message}</strong>
+                <span>
+                  {hand.feedback.helper
+                    ? "Magic hand active · legal moves glow"
+                    : "Second hand: open palm to illuminate your selected piece."}
+                </span>
+                {selected && (
+                  <button
+                    className="text-button"
+                    data-air
+                    onClick={() => setSelected(null)}
+                  >
+                    Cancel selection
+                  </button>
+                )}
+              </div>
+            )}
             {hand.error && (
               <div className="inline-error" role="alert">
                 {hand.error}
@@ -855,22 +870,22 @@ export default function AirChess() {
         <div className="gesture-step">
           <span className="step-number">01</span>
           <div>
-            <strong>Point</strong>
-            <span>Find your piece</span>
+            <strong>Aim & settle</strong>
+            <span>Wait for the square glow</span>
           </div>
         </div>
         <div className="gesture-step">
           <span className="step-number">02</span>
           <div>
-            <strong>Pinch & move</strong>
-            <span>Bring it with you</span>
+            <strong>Double pinch</strong>
+            <span>Select your piece</span>
           </div>
         </div>
         <div className="gesture-step">
           <span className="step-number">03</span>
           <div>
-            <strong>Release</strong>
-            <span>Make your move</span>
+            <strong>Double pinch again</strong>
+            <span>Confirm the destination</span>
           </div>
         </div>
         <button
@@ -1041,18 +1056,22 @@ export default function AirChess() {
                 <h2 id="dialog-title">A board. A hand. That’s it.</h2>
                 <div className="help-steps">
                   <p>
-                    <b>1. Set the scene.</b> Allow your camera, sit back
-                    slightly, and keep one or both open hands in good light.
-                    You’ll see the board over your camera view.
+                    <b>1. Choose a control hand.</b> Show just one open hand for
+                    a moment. It becomes your only move controller; the second
+                    hand never selects squares.
                   </p>
                   <p>
-                    <b>2. Pick up a piece.</b> Move your index fingertip over
-                    your piece. Pinch your thumb and index finger together, then
-                    move your hand to a highlighted square.
+                    <b>2. Select deliberately.</b> Aim at the center of your
+                    piece and wait for its square to glow. Pinch and open twice,
+                    keeping your palm still. The first pinch locks the target;
+                    the second selects it.
                   </p>
                   <p>
-                    <b>3. Let go.</b> Separate your fingers to place the piece.
-                    If your hand leaves the frame, the pickup is cancelled.
+                    <b>3. Confirm the destination.</b> Move your open hand to a
+                    legal destination. Wait for its glow and pinch/open twice
+                    again. Drifting, losing tracking, or waiting too long
+                    cancels the attempt. An open second palm animates the
+                    selected piece and legal squares.
                   </p>
                   <p>
                     <b>4. Use the menus.</b> Hold an open fingertip over a
@@ -1062,9 +1081,9 @@ export default function AirChess() {
                   </p>
                 </div>
                 <div className="help-note">
-                  Local practice lets either hand play both colors, and follows
-                  the active side by default. Reach assist brings far squares
-                  within a smaller hand movement. In a room, each laptop
+                  Your control hand plays both colors in local practice, which
+                  follows the active side by default. Reach assist brings far
+                  squares within a smaller hand movement. In a room, each laptop
                   controls its own color. Casual games are untimed; repetition
                   and fifty-move draws are automatic.
                 </div>
@@ -1121,6 +1140,18 @@ export default function AirChess() {
                   Use the slider or hover over the ± buttons. Pieces stay
                   visible, even at 100% transparency. Your setting is saved.
                 </p>
+                {cameraActive && (
+                  <button
+                    className="button secondary full setting-button"
+                    data-air
+                    onClick={() => {
+                      hand.recalibrate();
+                      setModal(null);
+                    }}
+                  >
+                    Choose control hand again
+                  </button>
+                )}
                 <button
                   className="button secondary full setting-button"
                   data-air

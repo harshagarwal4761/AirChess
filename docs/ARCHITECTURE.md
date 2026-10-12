@@ -15,15 +15,15 @@ flowchart LR
 
 ## Camera and gestures
 
-`use-hand-tracking.ts` acquires video without audio. Model and WebAssembly files are served locally by this app. Up to two hands are tracked simultaneously. Each owns its own smoothing, pinch, and dwell state. Wrist proximity and handedness match detections to stable cursor IDs even when the model returns hands in a different order. A pickup belongs to its initiating hand; the other hand cannot release or cancel it. Images are passed directly to local model inference and are not sent to any AirChess endpoint.
+`use-hand-tracking.ts` acquires video without audio and sends at most one frame at a time to a local Web Worker, capped at 20 FPS. Local MediaPipe model/WASM files detect up to two hands. Camera images never go to an AirChess endpoint. GPU inference falls back to CPU when unavailable. `scripts/build-hand-worker.mjs` bundles a classic worker for both dev and production because MediaPipe's WASM loader uses `importScripts`.
 
-The camera is mirrored and fills the viewport with `object-fit: cover`. `projectPoint` accounts for the horizontal mirror and image cropping. It gives screen coordinates that match the displayed fingertip. Optional reach assist then maps the central 76% of that view to the full viewport; disable it for direct fingertip mapping. An exponential smoother reduces cursor jitter.
+Calibration requires a single open hand for 500 ms. Its handedness becomes the control role; a second open palm only activates piece/hint animations. Missing or duplicate controller labels cancel the sequence rather than handing control to the helper. Handedness prediction can still be wrong under occlusion, so device testing remains necessary.
 
-Pinch distance is divided by palm width to reduce sensitivity to distance from the camera. Closing below 0.38 for 90 ms grabs; opening above 0.65 for 90 ms releases. This separate closing/opening threshold is called **hysteresis**: it prevents rapid toggles near a boundary. A newly detected hand must open before it can grab. Losing tracking for over 180 ms cancels a pickup and requires rearming.
+The mirrored camera fills the viewport with `object-fit: cover`; `projectPoint` accounts for mirroring and crop. Optional reach assist expands the central 76% to the viewport, but defaults off. Cursor smoothing applies while fingers are open, then freezes during pinching to prevent fingertip curl from changing the aimed square. Pinch distances account for camera aspect ratio and are normalized by palm width.
 
-Buttons use a 1.3-second open-hand hover. Board squares do not use hover activation. This keeps a slow hand crossing the board from accidentally clicking a piece. The same move function serves pointer and gesture controls. Promotion has a separate gesture-friendly dialog.
+`lib/gestures.ts` uses 0.38 closing and 0.65 opening thresholds, each stable for 90 ms. `lib/double-pinch.ts` requires an eligible square's central 64% to be targeted for 320 ms before locking it on the first pinch. Two complete close/open cycles confirm that same square. Palm drift beyond 32% of a square, a pinch held over 800 ms, a sequence over 2.2 seconds, or tracking loss cancels the attempt. A cooldown separates attempts. Source, turn, game, orientation, or modal changes reset a pending sequence. Only current-turn pieces and legal destinations are eligible.
 
-Inference runs on the main thread, limited to about 25 FPS, using GPU when possible and CPU fallback otherwise. Moving inference into a Web Worker is a useful future performance improvement. The current thresholds are starting values, not results of a user study.
+Buttons retain 1.3-second open-finger dwell, available only to the controller. The same `squareClick` path serves pointer and confirmed gesture actions. Selection then destination each require their own double pinch; promotions use the gesture-friendly dialog. A visible coordinate/progress indicator helps the user see which square will be confirmed. These thresholds are conservative starting values, not measured accuracy results.
 
 ## Game state
 

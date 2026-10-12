@@ -75,3 +75,12 @@ These checks need physical hands and cameras. The automated and two-tab checks d
 - [x] Regression tests for both-color gesture moves, hand loss/reordering, and competing pickups; inspect controls and republish the existing private site.
 
 Verification: 25 automated tests pass. Browser checks cover transparency endpoints/persistence and turn-following. The latest production build/type check will run during packaging. Physical two-hand tracking remains a manual acceptance check.
+
+## Phase 7 — deliberate double-pinch controls
+- [x] One calibrated control hand; second open palm animates the selected piece and legal squares only.
+- [x] Stable center targeting, two complete pinch cycles to select, two to move, visible progress, and cancellation on drift/loss/timeout.
+- [x] Lock the aimed square during pinching so fingertip curl cannot change the destination; correct hand-size distances for camera aspect ratio.
+- [x] Move landmark inference into a worker to avoid blocking interface rendering.
+- [x] Test gesture sequences, wrong-square guards, role isolation, and build/browser behavior; prepare the existing site for publication.
+
+Verification: 31 tests, typecheck, production build, actual worker/model blank-frame inference, and both-color UI targeting pass. Physical camera accuracy and a complete two-laptop gesture game remain human acceptance checks. Publication follows the final package check.

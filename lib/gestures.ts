@@ -12,10 +12,11 @@ export const initialGesture = (): GestureState => ({
   armed: false,
 });
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
-export function pinchRatio(points: Point[]) {
+export function pinchRatio(points: Point[], aspect = 1) {
+  const corrected = points.map((p) => ({ x: p.x * aspect, y: p.y }));
   return (
-    distance(points[4], points[8]) /
-    Math.max(distance(points[5], points[17]), 0.03)
+    distance(corrected[4], corrected[8]) /
+    Math.max(distance(corrected[5], corrected[17]), 0.03)
   );
 }
 // Hysteresis + 90ms stability suppresses noise. A newly acquired hand must open first.

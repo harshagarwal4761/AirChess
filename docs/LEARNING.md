@@ -38,3 +38,8 @@ The chess library separately checks whether your proposed move is legal. The mul
 5. Record the number of accidental moves in 20 attempts under different lighting conditions.
 
 You can honestly say this project was built with AI assistance. What makes it yours is learning how it works, testing it, making your own decisions, and being able to explain the tradeoffs. You do not need to pretend you wrote every line unaided.
+
+## Why the new gesture needs two pinches
+The landmark model estimates points; ordinary code decides when those points count as an action. `lib/double-pinch.ts` waits for stable aiming, remembers a square, and counts two complete close/open cycles. The palm acts as a steadier reference than a curling fingertip. Try explaining why the target is locked before the move is accepted, and why the second hand is limited to a visual effect.
+
+The worker is a separate browser execution thread. It lets the interface keep drawing while model inference runs. It does not make every webcam equally accurate; measure latency and accidental selections on your own device.

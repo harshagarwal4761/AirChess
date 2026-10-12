@@ -1,6 +1,6 @@
 # AirChess
 
-**Your next move. In the air.** A webcam chess app with pinch-to-move controls, a translucent camera overlay, and online rooms for two players.
+**Your next move. In the air.** A webcam chess app with double-pinch controls, a translucent camera overlay, and online rooms for two players.
 
 This is a computer-vision application, not a physical hologram. You look at the screen and move your hand in front of the webcam. MediaPipe's pretrained model runs locally in the browser; your camera frames are never uploaded by AirChess.
 
@@ -34,17 +34,18 @@ npm run dev
 
 1. Try a few moves by clicking a piece and a highlighted destination.
 2. Click **Enable air controls**, then allow camera access. Use a regular desktop browser if the embedded preview cannot open your camera.
-3. Keep one or both hands open and visible in a well-lit room. Point with your index finger, pinch thumb and index finger together over a piece, move, and release over a legal square.
-4. Hold an open fingertip over a button for 1.3 seconds to activate it. A border shows the dwell timer. Move away before activating that button again.
-5. Create a room and share its link or six-digit code. Your friend joins from their laptop and plays Black. Their camera is independent of yours.
+3. Show only your chosen control hand with its palm open until calibrated. Aim at the center of a piece until its square is marked ready. Close and reopen thumb/index twice to select it; aim at a highlighted destination and repeat. Keep your palm still through each double pinch.
+4. Optional: open your second palm to make the selected piece float and its legal destinations glow. This hand never selects pieces.
+5. Hold an open fingertip over a button for 1.3 seconds to activate it. A border shows the dwell timer. Move away before activating that button again.
+6. Create a room and share its link or six-digit code. Your friend joins from their laptop and plays Black. Their camera is independent of yours.
 
-The first camera permission prompt needs a click. The model/wasm download is about 19 MB on first use; it is served by the app. Tracking targets at most 25 inference frames per second and falls back from GPU to CPU if necessary. Actual performance depends on your device.
+The first camera permission prompt needs a click. The model/wasm download is about 19 MB on first use; it is served by the app. Tracking runs in a background Web Worker and targets at most 20 inference frames per second and falls back from GPU to CPU if necessary. Actual performance depends on your device.
 
 **A localhost link only works on the computer running the server.** To play from different laptops, both players need access to the same HTTPS deployment. Do not send your friend `127.0.0.1`. Ordinary unencrypted LAN URLs generally cannot access the webcam. The Sites deployment starts owner-private; a friend cannot enter until site sharing is configured to allow them.
 
 ## Included
 
-- Local practice playing both sides with either hand; the active color rotates toward you by default. No computer opponent yet.
+- Local practice playing both sides with your calibrated control hand; the active color rotates toward you by default. No computer opponent yet.
 - Server-validated multiplayer rooms, separate White/Black seats, refresh recovery in the same browser tab.
 - Castling, en passant, four promotion choices, check/checkmate, stalemate, insufficient-material draws.
 - Automatic threefold-repetition and fifty-move draws (a casual-play convention, not a full tournament claim procedure).
@@ -73,6 +74,8 @@ See [TESTING.md](docs/TESTING.md) for the tested cases and the remaining real-ca
 | `app/page.tsx` | Board, room interface, dialogs, game controls |
 | `app/globals.css` | Visual design and responsive camera layout |
 | `hooks/use-hand-tracking.ts` | Webcam and MediaPipe lifecycle, cursor, dwell activation |
+| `workers/hand-tracking.worker.ts` | Off-thread model loading and landmark inference |
+| `lib/double-pinch.ts` | Stable target locking, double-pinch confirmation, role guards |
 | `lib/gestures.ts` | Pinch state machine and camera-to-screen mapping |
 | `lib/game.ts` | Chess replay, results, moves, draw/rematch rules |
 | `lib/room-service.ts` | Seat authentication, room storage, atomic updates |
@@ -87,5 +90,9 @@ Describe this as **a gesture-controlled multiplayer chess application using a pr
 
 Built with React, TypeScript, Vinext/Vite, Cloudflare D1, chess.js, and MediaPipe. See [THIRD_PARTY.md](docs/THIRD_PARTY.md) for sources. The project is a portfolio prototype, not a hardened public chess service: before opening anonymous access widely, add per-client rate limits, room cleanup, stronger seat recovery, observability, and device testing.
 
-### Two-hand controls
-Both hands have independent numbered cursors. Either can move the current color, but only one hand can carry a piece at a time. Release or cancel that pickup before switching hands. Settings includes Reach assist (less movement to reach the edges) and Follow active side for local practice. Disable either if you prefer a fixed board or direct fingertip mapping.
+### Two-hand roles and accuracy guards
+One calibrated hand controls moves and menus. The second open palm activates a visual effect only. Use **Settings → Choose control hand again** to switch the controller. Loss or ambiguous handedness cancels input; the helper is never deliberately promoted to controller.
+
+Aim inside the central 64% of a square for 320 ms. The first pinch locks that square; complete two close/open cycles within 2.2 seconds. Excessive palm drift, long holds, or tracking loss cancels the attempt. The aim cursor freezes while pinching so fingertip curl cannot switch squares. Watch the coordinate and 1/2 confirmation indicator. These guards reduce mistakes, but physical testing is still needed; no webcam system can promise zero wrong selections.
+
+Settings includes optional Reach assist (off by default), Follow active side for local practice, and saved board transparency. Local practice allows the same controller to play White and Black.

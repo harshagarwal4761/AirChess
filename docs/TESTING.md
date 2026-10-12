@@ -2,7 +2,7 @@
 
 ## Automated
 
-- `npm test`: 25 tests for turn legality, castling, en passant, all promotion pieces, checkmate, stalemate, material/fifty-move/repetition draws, draw agreement, mutual rematch, resignation, pinch arming/hysteresis/stability/loss, mapping, and scale normalization.
+- `npm test`: 31 tests for turn legality, castling, en passant, all promotion pieces, checkmate, stalemate, material/fifty-move/repetition draws, draw agreement, mutual rematch, resignation, pinch arming/hysteresis/stability/loss, mapping, and scale normalization.
 - `npm run typecheck`: TypeScript compile validation.
 - `npm run build`: complete production Worker/client build.
 - `node tests/multiplayer.integration.mjs`: real local HTTP/D1 tests using distinct player credentials. Covers create/join, occupied seats, unauthorized reads, malformed credentials, out-of-turn/illegal/stale moves, simultaneous updates, refresh-style reads, draw consent, mutual rematch, and resignation.
@@ -23,8 +23,8 @@ These are not marked as passed by automated landmark tests.
 
 - [ ] Grant permission and check the model loads in the intended browser.
 - [ ] Verify the pointer follows the visible mirrored fingertip at every board corner.
-- [ ] Make 20 intended moves with no accidental release; record success rate and latency.
-- [ ] Move the hand out of view while pinched: no move should commit.
+- [ ] Make 20 intended double-pinch moves; record first-attempt success, wrong squares, cancellations, and latency.
+- [ ] Lose the controller after the first pinch: no move should commit; the helper must not take over.
 - [ ] Open a menu with dwell; leave and reenter to activate the same key twice.
 - [ ] Use the gesture keypad to join; select all promotion options in test games.
 - [ ] Check both bright/dim lighting and left/right hands.
@@ -36,12 +36,19 @@ These are not marked as passed by automated landmark tests.
 
 A private hosted deployment verifies build/runtime availability but does not grant a friend access. Site sharing and game room access are separate. Public exposure should follow a deliberate review of rate limits and retention. No cross-laptop or real-webcam claims should be inferred from the local two-tab test.
 
-## Phase 6 regression coverage
-Eleven additional tests cover stable hand identity when detection order changes, label jitter, one-hand pickup ownership, White/Black gesture sequences with all four hand combinations, practice orientation, reach mapping, blocked input, and safe cancellation when crossing hands makes identity ambiguous. These use synthetic pinch events; physical two-hand and crossing/occlusion checks remain manual.
+## Earlier transparency/practice checks
+Browser verification: 0% and 100% slider endpoints checked; at 100% both square backgrounds compute to alpha 0. A 75% setting survives refresh. After e4, local practice rotates Black to the bottom.
 
-- [ ] Move White and Black using only one hand, then alternate hands.
-- [ ] Track both hands at once; lose the idle hand while the other carries a piece.
-- [ ] Cross hands and verify ambiguous tracking cancels safely rather than moves a piece.
-- [ ] Set transparency to 0%, 50%, and 100%; refresh and verify persistence.
+## Phase 7 regression coverage
+The current suite replaces the superseded two-independent-controller tests. It covers complete double-pinch confirmation, single pinch rejection, settling, target changes, fingertip curl, palm drift, tracking loss, timeout, long holds, square border exclusion, controller isolation, helper palm detection, camera aspect ratio, real pinch-edge sequences, practice orientation, and reach mapping, alongside chess legality tests.
 
-Browser verification for Phase 6: 0% and 100% slider endpoints checked; at 100% both square backgrounds compute to alpha 0. A 75% setting survives refresh. After e4, local practice rotates Black to the bottom. Settings panel visually inspected. Actual two-hand camera tracking still needs device testing.
+- [ ] Calibrate either hand; show the other and verify it only animates the selected piece/hints.
+- [ ] Move White and Black in local practice with the same controller.
+- [ ] Cross/occlude hands and verify cancellation; record any handedness misclassification.
+- [ ] Aim at square borders or move the palm during confirmation: no adjacent square should be chosen.
+- [ ] Make two complete pinches on source and destination at varied comfortable speeds.
+- [ ] Verify the ready coordinate and 1/2 indicator are understandable.
+
+Actual physical gesture accuracy remains unverified. Automated landmark sequences cannot establish a zero-error interaction guarantee.
+
+Phase 7 software verification (12 October 2026): 31/31 tests and TypeScript validation pass; production build passes. A temporary local browser diagnostic loaded the actual model/WASM in the classic worker and completed blank-frame inference (zero hands), without accessing the webcam. Local UI checks verified White e4 and Black e5, both colors' eligible gesture targets, and the updated guide. No console errors appeared in those UI paths. The diagnostic page was removed before publication.

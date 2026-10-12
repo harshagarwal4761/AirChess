@@ -9,7 +9,7 @@ Use this wording after you have studied and can explain the implementation. Do n
 ## A 90-second demo
 
 1. Show the camera view and explain that inference stays on the device.
-2. Pinch a pawn, show its legal destinations, and release it.
+2. Double pinch a pawn to select it, open the helper palm to animate it, then double pinch a legal destination.
 3. Bring a friend into the room on another laptop; show their board is oriented for Black.
 4. Make one move from each laptop and show synchronization.
 5. Show promotion choices or a draw offer, then explain tracking-loss cancellation.
@@ -27,7 +27,7 @@ Record this only after testing it on the actual devices. The local automated and
 - What is a revision check? (A write succeeds only if the state has not changed since it was read.)
 - Why keep all moves? (To reconstruct the game and detect repetition.)
 - Why polling? (Simple hosting and adequate latency for untimed turn-based games.)
-- What remains limited? (Device variability, hand fatigue, main-thread inference, no clocks, no accounts, no broad abuse controls.)
+- What remains limited? (Device variability, hand fatigue, handedness errors under occlusion, no clocks, no accounts, no broad abuse controls.)
 
 ## Measurable next improvement
 
