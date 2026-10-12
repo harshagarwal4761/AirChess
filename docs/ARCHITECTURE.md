@@ -15,7 +15,7 @@ flowchart LR
 
 ## Camera and gestures
 
-`use-hand-tracking.ts` acquires video without audio and sends at most one frame at a time to a local Web Worker, capped at 20 FPS. Local MediaPipe model/WASM files detect up to two hands. Camera images never go to an AirChess endpoint. GPU inference falls back to CPU when unavailable. `scripts/build-hand-worker.mjs` bundles a classic worker for both dev and production because MediaPipe's WASM loader uses `importScripts`.
+`use-hand-tracking.ts` acquires video without audio and sends at most one frame at a time to a local Web Worker. Camera-frame callbacks replace the prior 20 FPS throttle, with a requestAnimationFrame fallback. Busy frames are skipped instead of queued. Local MediaPipe model/WASM files detect up to two hands. Camera images never go to an AirChess endpoint. GPU inference falls back to CPU when unavailable. `scripts/build-hand-worker.mjs` bundles a classic worker for both dev and production because MediaPipe's WASM loader uses `importScripts`.
 
 Calibration requires a single detected hand with thumb/index apart for 300 ms. Its handedness becomes the control role. The second open palm pauses input immediately, preserving any selected chess piece. It must be lowered for 350 ms before resuming. Missing or ambiguous controller labels reset pending confirmation, without dropping the selected piece. Handedness prediction can still be wrong under occlusion.
 
@@ -51,3 +51,8 @@ The client polls approximately every 900 ms when visible and every 4 seconds whi
 D1 persists rooms through Worker restarts. Rooms become unavailable after seven days without a write. Expired rows are not yet physically purged. There is no matchmaking, spectator protocol, per-user rate limiter, or account recovery. Before a public launch these need explicit design. The initial hosted site is private and its hosting access policy is independent of game room membership.
 
 Local practice always uses the actual side to move, independent of hand identity or board orientation. Follow active side rotates the current color to the bottom. In online rooms the server still limits each player to their own color.
+
+## Movable layout and rendering
+`MovableSurface` applies translated offsets directly during pointer dragging, saves preferences on release/nudge, and clamps moved panels to the viewport. ResizeObserver and resize events keep saved layouts reachable. Layout events cancel unfinished gesture confirmation; arranging mode disables chess-square gestures while leaving menu nudges usable. Active pointer dragging pauses all air input. Hit testing always uses the actual translated square rectangle, so moving the board does not add a separate coordinate offset.
+
+Legal moves and game history are memoized by position/selection; board elements rerender for board/target changes, not every progress tick. Feedback percentages are coarsened without changing the confirmation timer or imperative cursor progress ring. Video-frame callbacks are cancelled with camera shutdown. The FPS and capture-to-result delay are measured, not advertised capabilities. No model simplification or resolution reduction is used.

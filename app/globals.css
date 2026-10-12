@@ -12,6 +12,7 @@
 * {
   box-sizing: border-box;
 }
+html { scrollbar-gutter: stable; }
 body {
   margin: 0;
   font-family: "DM Sans", sans-serif;
@@ -132,6 +133,8 @@ h2,
   mask-image: linear-gradient(transparent, #000);
 }
 .topbar {
+  position: relative;
+  z-index: 40;
   height: 84px;
   border-bottom: 1px solid var(--line);
   display: flex;
@@ -1526,3 +1529,16 @@ h2 {
 .aim-progress { height: 4px; border-radius: 3px; overflow: hidden; background: #bfead622; }
 .aim-progress span { display: block; height: 100%; background: #f8dfa6; transition: width 60ms linear; }
 .air-paused .board-shell { outline: 2px solid #f8dfa6; }
+
+.movable-surface { position: relative; }
+.panel-mover { display: flex; align-items: center; gap: 3px; padding: 4px; margin: 0 0 8px; border: 1px dashed #bfead680; border-radius: 6px; background: #10251fee; color: #d0ecdc; }
+.panel-mover button { color: inherit; border: 0; background: #c6ead510; border-radius: 4px; padding: 5px; display: flex; align-items: center; justify-content: center; min-width: 24px; min-height: 26px; cursor: pointer; }
+.panel-mover .drag-handle { flex: 1; justify-content: flex-start; gap: 6px; cursor: grab; touch-action: none; user-select: none; font-size: 10px; }
+.movable-surface[data-dragging] .drag-handle { cursor: grabbing; }
+.movable-surface[data-dragging] { will-change: transform; }
+.panel-mover button:hover { background: #c6ead52b; }
+.panel-mover button:focus-visible { outline: 2px solid #f8dfa6; outline-offset: 1px; }
+.modal .panel-mover { margin-right: 15px; }
+@media (max-width: 699px) { .top-actions { gap: 4px; } .top-actions .text-button { font-size: 10px; } }
+/* Avoid repeatedly blurring a changing camera image behind nearly opaque panels. */
+.camera-on .panel, .camera-on .modal-backdrop { backdrop-filter: none; }

@@ -60,3 +60,13 @@ Phase 7 software verification (12 October 2026): 31/31 tests and TypeScript vali
 To reproduce after `npm run build`: run `node scripts/build-gesture-qa.mjs`, start `npm start -- --port 5173`, open `/gesture-qa/`, and click **Run synthetic gesture checks**. This is an explicitly simulated local test, not a webcam accuracy measurement. Run a normal production build afterward to remove the diagnostic assets before packaging. No test route or model override is imported by the production app.
 
 Physical acceptance now starts with Steady hover: show one hand with thumb/index apart, confirm the cursor follows the visible fingertip, hold on a piece until the ring fills, then hold on a highlighted destination. Raise/lower a second open palm to pause/resume. Measure incorrect squares, missed selections, and latency under your actual lighting.
+
+## Phase 9: movable panels and frame scheduling
+
+39 unit tests and TypeScript validation pass. Both video-frame callbacks and the RAF fallback passed all 17 synthetic browser assertions, including moved-board selection, both colors, double pinch, helper pause, illegal destinations, one frame in flight, cleanup, and layout reset. Synthetic throughput exceeded the former 20 FPS ceiling (49–60 FPS with simulated inference); these are not webcam/model benchmarks. Camera resolution, model confidence, smoothing, and gesture confirmation durations are unchanged.
+
+Manual browser checks verified actual pointer dragging, keyboard nudges, a moved room panel, exact board offset restoration after reload, settings-dialog dragging and reopening, and layout reset. The header remains above movable panels so Reset layout remains accessible. Local multiplayer integration checks cover seat ownership, legal turns, state synchronization, stale/racing requests, draw, rematch, and resignation.
+
+Real webcam FPS/accuracy and a full two-laptop gesture game remain human acceptance checks. Production packaging removes the local synthetic harness.
+
+Narrow-screen regression: a panel resize notification used to reset a pinch even when its offset was unchanged. Layout notifications now fire only for actual movement or window resize, and a stable scrollbar gutter prevents width oscillation. The same 17 gesture checks pass at a 755-pixel browser width. The diagnostic overlay is pointer-transparent and resets saved test positions before each run.

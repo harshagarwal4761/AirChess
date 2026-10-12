@@ -5,7 +5,10 @@ import { createRoot } from "react-dom/client";
 import AirChess from "../../app/page";
 import "../../app/globals.css";
 let square = "e2", ratio = 1.1, missing = false, helper = false, curl = 0;
-let stopped = 0;
+let stopped = 0, frames = 0, processing = 0, maxProcessing = 0;
+let layoutEvents = 0;
+const pinchTrace: string[] = [];
+window.addEventListener('airchess-layout-change', () => layoutEvents++);
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const video = HTMLVideoElement.prototype;
 Object.defineProperties(video, {
@@ -15,6 +18,12 @@ Object.defineProperties(video, {
   currentTime: { get: () => performance.now() / 1000, configurable: true },
 });
 video.play = async () => {};
+if (new URLSearchParams(location.search).get("scheduler") === "fallback") {
+  Object.defineProperty(video, "requestVideoFrameCallback", { value: undefined, configurable: true });
+} else {
+  video.requestVideoFrameCallback = callback => window.setTimeout(() => callback(performance.now(), { mediaTime: performance.now() / 1000 } as VideoFrameCallbackMetadata), 16);
+  video.cancelVideoFrameCallback = id => clearTimeout(id);
+}
 const stream = new MediaStream();
 stream.getTracks = () => [{ stop: () => stopped++ } as unknown as MediaStreamTrack];
 Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => stream } });
@@ -38,7 +47,9 @@ class FakeWorker {
   onerror?: () => void;
   dead = false;
   postMessage(data: { type: string; timestamp: number }) {
+    if (data.type === "frame") { frames++; processing++; maxProcessing = Math.max(maxProcessing, processing); }
     setTimeout(() => {
+      if (data.type === "frame") processing--;
       if (this.dead) return;
       if (data.type === "init") this.onmessage?.({ data: { type: "ready" } });
       else this.onmessage?.({ data: { type: "result", timestamp: data.timestamp, landmarks: missing ? [] : helper ? [screenHand(), screenHand(true)] : [screenHand()], handedness: missing ? [] : helper ? [[{ categoryName: "Right" }], [{ categoryName: "Left" }]] : [[{ categoryName: "Right" }]] } });
@@ -50,8 +61,8 @@ window.Worker = FakeWorker as unknown as typeof Worker;
 const root = document.createElement("div"); document.body.appendChild(root);
 createRoot(root).render(<AirChess />);
 const panel = document.createElement("div");
-panel.style.cssText = "position:fixed;right:8px;bottom:8px;z-index:1000;background:#fff;color:#111;padding:12px;max-width:420px;font:12px monospace;border:2px solid #24834d";
-panel.innerHTML = '<button id="run-qa">Run synthetic gesture checks</button><pre id="qa-results">Camera and model are simulated in this local test only.</pre>';
+panel.style.cssText = "position:fixed;right:8px;bottom:8px;z-index:1000;background:#fff;color:#111;padding:12px;max-width:420px;font:12px monospace;border:2px solid #24834d;pointer-events:none";
+panel.innerHTML = '<button id="run-qa" style="pointer-events:auto">Run synthetic gesture checks</button><pre id="qa-results">Camera and model are simulated in this local test only.</pre>';
 document.body.appendChild(panel);
 const log = document.querySelector('#qa-results')!;
 const check = (ok: boolean, name: string) => { log.textContent += `\n${ok ? "PASS" : "FAIL"}: ${name}`; if (!ok) throw new Error(name); };
@@ -62,13 +73,30 @@ const piece = (name: string, value: string) => cell(name).getAttribute('aria-lab
 async function aim(name: string, ms = 1550) { square = name; await pause(ms); }
 async function pinches(name: string) {
   square = name; ratio = 1.1; curl = 0; await pause(550);
-  for (let i = 0; i < 2; i++) { ratio = .2; curl = 25; await pause(250); ratio = 1.1; curl = 0; await pause(250); }
+  for (let i = 0; i < 2; i++) {
+    for (const closed of [true, false]) {
+      ratio = closed ? .2 : 1.1; curl = closed ? 25 : 0;
+      for (let j = 0; j < 5; j++) { await pause(50); pinchTrace.push(`${closed ? 'closed' : 'open'} layout=${layoutEvents}: ${root.querySelector('.air-feedback strong')?.textContent}`); }
+    }
+  }
   await pause(200);
 }
 document.querySelector('#run-qa')!.addEventListener('click', async () => {
   (document.querySelector('#run-qa') as HTMLButtonElement).disabled = true;
+  (document.querySelector('#run-qa') as HTMLButtonElement).style.pointerEvents = 'none';
   log.textContent = "Running actual React page + tracking hook with synthetic landmarks…";
   try {
+    button('Arrange layout').click(); await pause(100);
+    button('Reset layout').click(); await pause(100);
+    const board = root.querySelector('[data-movable="board"]')!;
+    const before = board.getBoundingClientRect();
+    const delta = before.left < 32 ? 24 : -24;
+    (root.querySelector(`[aria-label="Move Chessboard ${delta > 0 ? 'right' : 'left'}"]`) as HTMLButtonElement).click();
+    await pause(100);
+    check(Math.abs(board.getBoundingClientRect().left - before.left - delta) < 1 && board.getBoundingClientRect().width === before.width, 'board moves without changing square size');
+    check(Boolean(localStorage.getItem('airchess.layout.v1.board')), 'layout position saved');
+    button('Done arranging').click(); await pause(100);
+    const startedAt = performance.now();
     button('Enable air controls').click(); await pause(900);
     // Regression: a naturally curled thumb previously froze the cursor.
     ratio = .5; await aim('d2', 600);
@@ -76,7 +104,9 @@ document.querySelector('#run-qa')!.addEventListener('click', async () => {
     const cursor = root.querySelector('.air-cursor') as HTMLElement;
     const pos = new DOMMatrix(getComputedStyle(cursor).transform);
     check(Math.hypot(pos.m41 - r.left - r.width / 2, pos.m42 - r.top - r.height / 2) < 6, 'cursor follows index with thumb partly closed');
-    await aim('e2'); check(selected('e2'), 'hover selects intended White pawn');
+    await aim('e2'); check(selected('e2'), 'hover selects intended White pawn on moved board');
+    const measuredFps = frames * 1000 / (performance.now() - startedAt);
+    check(measuredFps > 24, `uncapped synthetic throughput ${Math.round(measuredFps)} FPS`);
     await pause(1450); check(selected('e2'), 'holding does not deselect or repeat');
     missing = true; await pause(300); check(selected('e2'), 'tracking loss preserves selection');
     missing = false; await aim('d5'); check(piece('e2','white pawn'), 'illegal square cannot move the piece');
@@ -90,6 +120,11 @@ document.querySelector('#run-qa')!.addEventListener('click', async () => {
     await pinches('f3'); check(piece('f3','white knight'), 'double pinch commits intended destination');
     button('Stop camera').click(); await pause(100);
     check(stopped > 0, 'camera resources released');
-    log.textContent += '\nALL 12 CHECKS PASSED';
-  } catch (error) { log.textContent += `\nSTOPPED: ${error}`; }
+    check(maxProcessing === 1, 'only one frame in flight');
+    button('Arrange layout').click(); await pause(50);
+    button('Reset layout').click(); await pause(50);
+    check(!localStorage.getItem('airchess.layout.v1.board'), 'layout reset clears stored offsets');
+    button('Done arranging').click();
+    log.textContent += '\nALL 17 CHECKS PASSED';
+  } catch (error) { log.textContent += `\nSTOPPED: ${error}\n${pinchTrace.join('\n')}`; }
 });

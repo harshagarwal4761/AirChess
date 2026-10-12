@@ -36,9 +36,9 @@ For an existing checkout with dependencies and the database prepared, run `npm r
 5. Hold an open fingertip over a button for 1.3 seconds to activate it. A border shows the dwell timer. Move away before activating that button again.
 6. Create a room and share its link or six-digit code. Your friend joins from their laptop and plays Black. Their camera is independent of yours.
 
-The first camera permission prompt needs a click. The model/wasm download is about 19 MB on first use; it is served by the app. Tracking runs in a background Web Worker and targets at most 20 inference frames per second and falls back from GPU to CPU if necessary. Actual performance depends on your device.
+The first camera permission prompt needs a click. The model/wasm download is about 19 MB on first use; it is served by the app. Tracking runs in a background Web Worker, processing fresh camera frames as soon as the model is free. It requests up to 60 camera FPS and falls back from GPU to CPU if necessary. Actual performance depends on your device.
 
-**A localhost link only works on the computer running the server.** To play from different laptops, both players need access to the same HTTPS deployment. Do not send your friend `127.0.0.1`. Ordinary unencrypted LAN URLs generally cannot access the webcam. The Sites deployment starts owner-private; a friend cannot enter until site sharing is configured to allow them.
+**A localhost link only works on the computer running the server.** To play from different laptops, both players need access to the same HTTPS deployment. Do not send your friend `127.0.0.1`. Ordinary unencrypted LAN URLs generally cannot access the webcam. The hosted AirChess site is configured for anyone with its link. Both players open https://airchess-gesture-play.richroot2.chatgpt.site/ ; one chooses Create room and the other chooses Join room and enters the six-digit code. GitHub stores the source; it does not run the multiplayer server. Each player enables their own camera.
 
 ## Included
 
@@ -97,3 +97,10 @@ Double pinch is optional. Aim inside the central 88% of a square for 160 ms befo
 The second open palm pauses gesture input immediately and resumes 350 ms after it is lowered. Use **Settings → Choose control hand again** to switch the controller. Local practice lets the same control hand play both colors. Saved board transparency remains available.
 
 Synthetic integration tests exercise the actual React page and hook, but cannot establish webcam accuracy across users. No claim of zero incorrect selections is made.
+
+### Move the board and panels
+Use **Arrange layout** in the top bar. Drag a panel by its labeled handle, or hover over its arrow buttons to nudge it in the air. A focused handle also responds to arrow keys (8px), or Shift+arrow (32px). Click **Done arranging** to resume chess selection. Panels may overlap; the one being moved comes to the front.
+
+The board, Air controls, Friendly match, and Move history panels save their offsets in this browser. Dialogs have their own always-visible move handles. **Reset layout** (or **Settings → Reset panel positions**) restores the default positions. Screen-edge limits keep handles reachable after resizing.
+
+The tracking readout shows processed FPS and average capture-to-result delay in milliseconds. The previous artificial 20 FPS cap has been removed; actual FPS is limited by the camera, model, GPU/CPU, and browser. Camera resolution, model, confidence thresholds, smoothing, hover duration, and pinch safeguards are retained. Nearly opaque panel blur is disabled over live video to reduce GPU work.

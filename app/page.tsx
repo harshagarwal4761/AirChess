@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Color, Square } from "chess.js";
 import {
   ArrowUpRight,
@@ -34,6 +34,8 @@ import {
 } from "../lib/game";
 import { useHandTracking, type AirEvent } from "../hooks/use-hand-tracking";
 
+import { MovableSurface } from "../components/movable-surface";
+import { resetPanelLayout } from "../lib/panel-layout";
 import type { AimMode } from "../lib/air-pointer";
 import { practiceOrientation } from "../lib/air-controls";
 
@@ -93,6 +95,7 @@ export default function AirChess() {
   const [aimMode, setAimMode] = useState<AimMode>("hover");
   const [flipped, setFlipped] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [arranging, setArranging] = useState(false);
   const [copied, setCopied] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const keyRef = useRef("");
@@ -113,8 +116,13 @@ export default function AirChess() {
       /* Preference storage is optional. */
     }
   }
-  useEffect(() => {
+  function changeFocusMode(value: boolean) {
+    setFocusMode(value);
+    try { localStorage.setItem("airchess.focus", String(value)); } catch { /* Optional preference. */ }
+  }
+  useLayoutEffect(() => {
     try {
+      setFocusMode(localStorage.getItem("airchess.focus") === "true");
       const saved = localStorage.getItem("airchess.opacity");
       if (saved !== null && Number.isFinite(Number(saved)))
         setOpacity(Math.max(0, Math.min(1, Number(saved))));
@@ -126,10 +134,8 @@ export default function AirChess() {
     !state.result &&
     !busy &&
     (!room || (room.ready && room.color === chess.turn()));
-  const legal = selected
-    ? chess.moves({ square: selected, verbose: true })
-    : [];
-  const history = chess.history({ verbose: true });
+  const legal = useMemo(() => selected ? chess.moves({ square: selected, verbose: true }) : [], [chess, selected]);
+  const history = useMemo(() => chess.history({ verbose: true }), [chess]);
   const lastMove = history.at(-1);
   const sound = useCallback(() => {
     if (muted) return;
@@ -338,12 +344,12 @@ export default function AirChess() {
       setSelected(null);
       return;
     }
-    if (!modal && !promotion && canMove) squareClick(event.square as Square);
+    if (!arranging && !modal && !promotion && canMove) squareClick(event.square as Square);
   };
   const hand = useHandTracking(
     handleAir,
     reachAssist,
-    `${room?.code ?? "practice"}:${state.game}:${state.moves.length}:${selected}:${orientation}:${modal}:${Boolean(promotion)}:${canMove}`,
+    `${room?.code ?? "practice"}:${state.game}:${state.moves.length}:${selected}:${orientation}:${modal}:${Boolean(promotion)}:${canMove}:${arranging}`,
     aimMode,
   );
   const cameraActive =
@@ -356,6 +362,48 @@ export default function AirChess() {
     (_, i) =>
       `${files[orientation === "w" ? i % 8 : 7 - (i % 8)]}${orientation === "w" ? 8 - Math.floor(i / 8) : 1 + Math.floor(i / 8)}` as Square,
   );
+  const boardClick = useRef(squareClick);
+  boardClick.current = squareClick;
+  const boardSquares = useMemo(() => squares.map((square, i) => {
+                  const piece = chess.get(square);
+                  const isLegal = legal.some((m) => m.to === square);
+                  const check =
+                    piece?.type === "k" &&
+                    piece.color === chess.turn() &&
+                    chess.isCheck();
+                  return (
+                    <button
+                      key={square}
+                      data-square={square}
+                      data-air-square={
+                        !arranging &&
+                        !modal &&
+                        !promotion &&
+                        canMove &&
+                        (piece?.color === chess.turn() || isLegal)
+                          ? square
+                          : undefined
+                      }
+                      className={`square ${(Math.floor(i / 8) + (i % 8)) % 2 ? "dark" : "light"} ${selected === square ? "selected" : ""} ${lastMove?.from === square || lastMove?.to === square ? "last-move" : ""} ${check ? "in-check" : ""} ${hand.feedback.target === square ? "air-target" : ""} ${hand.feedback.target === square && hand.feedback.locked ? "air-locked" : ""}`}
+                      aria-label={`${square}${piece ? ` ${piece.color === "w" ? "white" : "black"} ${pieceNames[piece.type]}` : " empty"}${isLegal ? ", legal destination" : ""}`}
+                      aria-pressed={selected === square}
+                      onClick={() => boardClick.current(square)}
+                    >
+                      {i % 8 === 0 && (
+                        <span className="rank-label">{square[1]}</span>
+                      )}
+                      {Math.floor(i / 8) === 7 && (
+                        <span className="file-label">{square[0]}</span>
+                      )}
+                      {piece && <Piece type={piece.type} color={piece.color} />}{" "}
+                      {isLegal && (
+                        <span
+                          className={`legal-marker ${piece ? "capture-marker" : ""}`}
+                        />
+                      )}
+                    </button>
+                  );
+                }), [orientation, chess, legal, lastMove, selected, canMove, modal, promotion, arranging, hand.feedback.target, hand.feedback.locked]);
   const statusText =
     state.result?.text ??
     (!room?.ready && room
@@ -495,6 +543,8 @@ export default function AirChess() {
           <span className="tiny-dot" /> A new way to make your move
         </div>
         <div className="top-actions">
+          <button className="text-button" data-air aria-pressed={arranging} onClick={() => { if (!arranging) changeFocusMode(true); setArranging(!arranging); }}>{arranging ? "Done arranging" : "Arrange layout"}</button>
+          {arranging && <button className="text-button" data-air onClick={resetPanelLayout}>Reset layout</button>}
           <button
             className="text-button"
             data-air
@@ -534,51 +584,13 @@ export default function AirChess() {
               </small>
             </div>
           </div>
-          <div className="board-region">
+          <MovableSurface as="div" className="board-region" panelId="board" title="Chessboard" enabled={arranging}>
             {playerBar(orientation === "w" ? "b" : "w")}
             <div className="board-shell">
               <div className="board-corner corner-tl" />
               <div className="board-corner corner-br" />
               <div className="board" role="group" aria-label="Chessboard">
-                {squares.map((square, i) => {
-                  const piece = chess.get(square);
-                  const isLegal = legal.some((m) => m.to === square);
-                  const check =
-                    piece?.type === "k" &&
-                    piece.color === chess.turn() &&
-                    chess.isCheck();
-                  return (
-                    <button
-                      key={square}
-                      data-square={square}
-                      data-air-square={
-                        !modal &&
-                        !promotion &&
-                        canMove &&
-                        (piece?.color === chess.turn() || isLegal)
-                          ? square
-                          : undefined
-                      }
-                      className={`square ${(Math.floor(i / 8) + (i % 8)) % 2 ? "dark" : "light"} ${selected === square ? "selected" : ""} ${lastMove?.from === square || lastMove?.to === square ? "last-move" : ""} ${check ? "in-check" : ""} ${hand.feedback.target === square ? "air-target" : ""} ${hand.feedback.target === square && hand.feedback.locked ? "air-locked" : ""}`}
-                      aria-label={`${square}${piece ? ` ${piece.color === "w" ? "white" : "black"} ${pieceNames[piece.type]}` : " empty"}${isLegal ? ", legal destination" : ""}`}
-                      aria-pressed={selected === square}
-                      onClick={() => squareClick(square)}
-                    >
-                      {i % 8 === 0 && (
-                        <span className="rank-label">{square[1]}</span>
-                      )}
-                      {Math.floor(i / 8) === 7 && (
-                        <span className="file-label">{square[0]}</span>
-                      )}
-                      {piece && <Piece type={piece.type} color={piece.color} />}{" "}
-                      {isLegal && (
-                        <span
-                          className={`legal-marker ${piece ? "capture-marker" : ""}`}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
+                {boardSquares}
               </div>
             </div>
             {playerBar(orientation, true)}
@@ -601,7 +613,7 @@ export default function AirChess() {
                 {room ? <Download size={16} /> : <RotateCcw size={16} />}
               </button>
             </div>
-          </div>
+          </MovableSurface>
           <div className="stage-footer">
             <span>
               <ShieldCheck size={14} /> Your camera stays on your device
@@ -610,7 +622,7 @@ export default function AirChess() {
           </div>
         </section>
         <aside className="sidebar">
-          <section className="panel camera-panel">
+          <MovableSurface className="panel camera-panel" panelId="controls" title="Air controls" enabled={arranging}>
             <div className="panel-top">
               <span className="eyebrow">AIR CONTROLS</span>
               <span className={`badge ${cameraActive ? "live" : ""}`}>
@@ -669,7 +681,7 @@ export default function AirChess() {
               <div className="air-feedback" role="status">
                 <strong>{hand.feedback.message}</strong>
                 <div className="aim-progress" role="progressbar" aria-label="Square confirmation" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(hand.feedback.progress * 100)}><span style={{ width: `${hand.feedback.progress * 100}%` }} /></div>
-                <span>{hand.fps} FPS · {hand.handCount} hand{hand.handCount === 1 ? "" : "s"} detected{aimMode === "double-pinch" ? ` · Pinch ${hand.feedback.pinched ? "closed" : "open"}` : ""}</span>
+                <span>{hand.fps} FPS · {hand.latency} ms · {hand.handCount} hand{hand.handCount === 1 ? "" : "s"} detected{aimMode === "double-pinch" ? ` · Pinch ${hand.feedback.pinched ? "closed" : "open"}` : ""}</span>
                 <span>{hand.feedback.helper ? "Controls paused · lower the second hand to resume" : "Second open palm pauses controls. Your selected piece is kept."}</span>
                 {selected && (
                   <button
@@ -692,8 +704,8 @@ export default function AirChess() {
                 ? "Hold over a button for 1.3s to activate it."
                 : "Mouse & keyboard work here, too."}
             </div>
-          </section>
-          <section className="panel room-panel">
+          </MovableSurface>
+          <MovableSurface className="panel room-panel" panelId="room" title="Friendly match" enabled={arranging}>
             <div className="panel-top">
               <span className="eyebrow">BETTER WITH A FRIEND</span>
               <Users size={17} />
@@ -759,8 +771,8 @@ export default function AirChess() {
                 </div>
               </>
             )}
-          </section>
-          <section className="panel moves-panel">
+          </MovableSurface>
+          <MovableSurface className="panel moves-panel" panelId="history" title="Move history" enabled={arranging}>
             <div className="panel-top">
               <span className="eyebrow">THE GAME SO FAR</span>
               <button
@@ -863,7 +875,7 @@ export default function AirChess() {
                 {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
               </button>
             </div>
-          </section>
+          </MovableSurface>
         </aside>
       </div>
       <section className="gesture-strip">
@@ -954,7 +966,7 @@ export default function AirChess() {
             if (e.target === e.currentTarget && !promotion) setModal(null);
           }}
         >
-          <section
+          <MovableSurface panelId={`dialog-${promotion ? "promotion" : modal}`} title="Dialog" enabled
             className={`modal ${modal === "settings" ? "settings-modal" : ""}`}
             role="dialog"
             aria-modal="true"
@@ -1139,10 +1151,12 @@ export default function AirChess() {
                     </button>
                   ))}
                 </div>
+                <p className="small-note">Use Arrange layout to drag panels or move them with the arrow buttons. Your positions are saved on this browser.</p>
                 <p className="small-note">
                   Use the slider or hover over the ± buttons. Pieces stay
                   visible, even at 100% transparency. Your setting is saved.
                 </p>
+                <button className="button secondary full setting-button" data-air onClick={resetPanelLayout}>Reset panel positions</button>
                 {cameraActive && (
                   <button
                     className="button secondary full setting-button"
@@ -1183,7 +1197,7 @@ export default function AirChess() {
                   className="button secondary full setting-button"
                   data-air
                   onClick={() => {
-                    setFocusMode(!focusMode);
+                    changeFocusMode(!focusMode);
                     setModal(null);
                   }}
                 >
@@ -1263,7 +1277,7 @@ export default function AirChess() {
                 </div>
               </>
             )}
-          </section>
+          </MovableSurface>
         </div>
       )}
     </main>

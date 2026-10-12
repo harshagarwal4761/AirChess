@@ -95,3 +95,10 @@ Verification: 31 tests, typecheck, production build, actual worker/model blank-f
 Physical webcam accuracy still requires user testing. Synthetic input should exercise the production interaction path rather than only isolated functions.
 
 Phase 8 checks: 36 unit tests, TypeScript validation, production build, and 12 browser integration assertions pass. Actual camera performance remains a user/device acceptance check.
+
+## Phase 9 — move panels and reduce tracking delay
+- [x] Add draggable board, control, room, history, and dialog surfaces; support arrow-key/air nudges, persistence, screen bounds, and layout reset.
+- [x] Remove the 20 FPS cap, schedule fresh camera frames without queuing, and avoid repeated chess computations/UI updates. Keep model resolution and gesture safeguards.
+- [x] Verify moved-board aiming, layout persistence/reset, modal movement, and gesture regression, including a narrow browser viewport.
+
+- [ ] Publish the tested build, verify GitHub matches, enable the user-requested public-link audience, and check hosted multiplayer.

@@ -76,6 +76,7 @@ export function useHandTracking(
   >("off");
   const [error, setError] = useState(""),
     [fps, setFps] = useState(0),
+    [latency, setLatency] = useState(0),
     [handCount, setHandCount] = useState(0),
     [feedback, setFeedback] = useState<Feedback>(idleFeedback);
   const callback = useRef(onEvent);
@@ -86,6 +87,8 @@ export function useHandTracking(
     worker?: Worker;
     stream?: MediaStream;
     frame?: number;
+    videoFrame?: number;
+    removeLayoutListener?: () => void;
     generation: number;
     recalibrate?: () => void;
     timeout?: ReturnType<typeof setTimeout>;
@@ -94,6 +97,10 @@ export function useHandTracking(
     const r = resources.current;
     r.generation++;
     if (r.frame) cancelAnimationFrame(r.frame);
+    if (r.videoFrame !== undefined) videoRef.current?.cancelVideoFrameCallback?.(r.videoFrame);
+    r.videoFrame = undefined;
+    r.removeLayoutListener?.();
+    r.removeLayoutListener = undefined;
     clearTimeout(r.timeout);
     r.worker?.terminate();
     r.stream?.getTracks().forEach((t) => t.stop());
@@ -112,6 +119,7 @@ export function useHandTracking(
     callback.current({ type: "cancel" });
     setStatus("off");
     setFps(0);
+    setLatency(0);
     setHandCount(0);
     setFeedback(idleFeedback);
   }, []);
@@ -136,6 +144,7 @@ export function useHandTracking(
         audio: false,
         video: {
           facingMode: "user",
+          frameRate: { ideal: 60, max: 60 },
           width: { ideal: 960 },
           height: { ideal: 540 },
         },
@@ -165,11 +174,11 @@ export function useHandTracking(
         lastPalm: Point | null = null;
       let lastKey = options.current.interactionKey + options.current.mode,
         lastSeen = 0,
-        lastInference = 0,
         lastVideo = -1,
         inFlight = false,
         ready = false,
         count = 0,
+        latencyTotal = 0,
         fpsSince = performance.now();
       let dwell: HTMLElement | null = null,
         dwellSince = 0,
@@ -196,6 +205,9 @@ export function useHandTracking(
         fired = null;
         if (cancelSelection) callback.current({ type: "cancel" });
       };
+      const layoutChanged = () => clearAttempt();
+      window.addEventListener("airchess-layout-change", layoutChanged);
+      r.removeLayoutListener = () => window.removeEventListener("airchess-layout-change", layoutChanged);
       const lose = () => {
         // Detection dropouts cancel pending input, never the selected chess piece.
         clearAttempt();
@@ -253,9 +265,18 @@ export function useHandTracking(
         const now = performance.now();
         lastSeen = now;
         count++;
+        latencyTotal += now - data.timestamp;
         if (now - fpsSince > 1000) {
           setFps(Math.round((count * 1000) / (now - fpsSince)));
-          fpsSince = now; count = 0;
+          setLatency(Math.round(latencyTotal / count));
+          fpsSince = now; count = 0; latencyTotal = 0;
+        }
+        if (document.documentElement.dataset.layoutDragging) {
+          clearAttempt();
+          const cursor = cursorRef.current?.children[0] as HTMLElement | undefined;
+          if (cursor) cursor.style.display = "none";
+          publish({ ...idleFeedback, controllerReady: Boolean(controller), message: "Moving a panel. Release the handle to resume controls." });
+          return;
         }
         const landmarks = data.landmarks as Point[][],
           labels = (data.handedness as { categoryName: string }[][]).map(
@@ -391,12 +412,12 @@ export function useHandTracking(
           ready: isHover ? Boolean(target) : stable,
           locked: !isHover && Boolean(sequence.locked),
           controllerReady: true, helper: false,
-          progress: Math.round(progress * 20) / 20, pinched: state.pinched,
+          progress: Math.round(progress * 10) / 10, pinched: state.pinched,
           message: confirmed ? `${confirmed} confirmed. Move to your next square.`
             : isHover
               ? target ? hover.blocked === target.square
                 ? "Selected. Move to a highlighted destination."
-                : `Hold on ${target.square} · ${Math.round(progress * 100)}%`
+                : `Hold on ${target.square} · ${Math.round(progress * 10) * 10}%`
                 : "Point at a piece, then hold for the ring to fill."
               : stepped.cancelled ? "Attempt cancelled. Aim and try again."
                 : sequence.locked ? `${sequence.locked.square}: ${sequence.count}/2 pinches. Open between pinches.`
@@ -434,42 +455,33 @@ export function useHandTracking(
         }
       };
       worker.postMessage({ type: "init", origin: location.origin });
-      const tick = (now: number) => {
-        if (r.generation !== generation) {
-          clearTimeout(timeout);
-          return;
-        }
-        r.frame = requestAnimationFrame(tick);
-        if (lastSeen && now - lastSeen > 750) {
-          lose();
-          lastSeen = 0;
-        }
-        if (
-          !ready ||
-          inFlight ||
-          document.hidden ||
-          video.readyState < 2 ||
-          video.currentTime === lastVideo ||
-          now - lastInference < 50
-        )
-          return;
-        lastVideo = video.currentTime;
-        lastInference = now;
+      // Capture each fresh camera frame when the model is ready. Never build a queue.
+      const capture = (now: number, mediaTime: number) => {
+        if (!ready || inFlight || document.hidden || video.readyState < 2 || mediaTime === lastVideo) return;
+        lastVideo = mediaTime;
         inFlight = true;
         createImageBitmap(video)
           .then((bitmap) => {
-            if (r.generation !== generation) {
-              bitmap.close();
-              return;
-            }
-            worker.postMessage({ type: "frame", bitmap, timestamp: now }, [
-              bitmap,
-            ]);
+            if (r.generation !== generation) { bitmap.close(); return; }
+            worker.postMessage({ type: "frame", bitmap, timestamp: now }, [bitmap]);
           })
-          .catch(() => {
-            inFlight = false;
-            fail("Camera frames could not be read. Restart the camera.");
-          });
+          .catch(() => { inFlight = false; fail("Camera frames could not be read. Restart the camera."); });
+      };
+      const hasVideoFrames = typeof video.requestVideoFrameCallback === "function";
+      if (hasVideoFrames) {
+        const onVideoFrame: VideoFrameRequestCallback = (now, metadata) => {
+          if (r.generation !== generation) return;
+          r.videoFrame = video.requestVideoFrameCallback(onVideoFrame);
+          capture(now, metadata.mediaTime);
+        };
+        r.videoFrame = video.requestVideoFrameCallback(onVideoFrame);
+      }
+      // RAF supplies the loss watchdog and a compatibility fallback for older browsers.
+      const tick = (now: number) => {
+        if (r.generation !== generation) return;
+        r.frame = requestAnimationFrame(tick);
+        if (lastSeen && now - lastSeen > 750) { lose(); lastSeen = 0; }
+        if (!hasVideoFrames) capture(now, video.currentTime);
       };
       r.frame = requestAnimationFrame(tick);
     } catch (e) {
@@ -495,6 +507,7 @@ export function useHandTracking(
     status,
     error,
     fps,
+    latency,
     handCount,
     feedback,
   };
