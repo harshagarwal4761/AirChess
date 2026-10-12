@@ -8,25 +8,22 @@ This is a computer-vision application, not a physical hologram. You look at the 
 
 You do **not** need to know ML to use this. You can learn the application one layer at a time. Start with [the beginner guide](docs/LEARNING.md), then [architecture](docs/ARCHITECTURE.md).
 
-### Run this existing checkout
+### Clone and run
 
-Node.js 22.13 or newer is required. The dependencies and local database have already been prepared in this workspace.
-
-```bash
-cd "/home/harsh/chess ml/airchess"
-npm run dev
-```
-
-Open the address printed by the terminal, normally **http://127.0.0.1:5173**. Keep that terminal running. A second dev server will not start on top of the first one.
-
-### Set up a fresh copy
+Install Node.js 22.13 or newer, then run:
 
 ```bash
+git clone https://github.com/harshagarwal4761/AirChess.git
+cd AirChess
 npm ci
 npm run build
 npm run db:setup
 npm run dev
 ```
+
+If the repository is private, sign in to GitHub with an account that has access before cloning. Open the address printed by the terminal, normally **http://127.0.0.1:5173**. Keep that terminal running.
+
+For an existing checkout with dependencies and the database prepared, run `npm run dev` from the project folder.
 
 `db:setup` creates the local database using the generated migrations and records which migrations have run. It is safe to repeat. Local and hosted databases are separate.
 
