@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Color, Square } from "chess.js";
+import { DeveloperCard } from "../components/developer-card";
 import {
   ArrowUpRight,
   Camera,
@@ -18,7 +19,6 @@ import {
   ScanLine,
   Settings2,
   ShieldCheck,
-  Sparkles,
   Users,
   Volume2,
   VolumeX,
@@ -46,7 +46,7 @@ type Room = {
   revision: number;
   state: RoomState;
 };
-type Modal = "join" | "help" | "settings" | "resign" | "leave" | "reset" | null;
+type Modal = "join" | "help" | "settings" | "about" | "resign" | "leave" | "reset" | null;
 const symbols: Record<string, string> = {
   k: "♚",
   q: "♛",
@@ -163,7 +163,7 @@ export default function AirChess() {
     const focusable = () =>
       Array.from(
         dialog?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input, [tabindex="0"]',
+          'button:not(:disabled), a[href], input, [tabindex="0"]',
         ) ?? [],
       );
     focusable()[0]?.focus();
@@ -535,10 +535,10 @@ export default function AirChess() {
         </div>
       </div>
       <header className="topbar">
-        <a className="brand" href="/" aria-label="AirChess home">
+        <div className="brand-identity"><a className="brand" href="/" aria-label="AirChess home">
           <span className="brand-mark">♞</span>Air<span>Chess</span>
-          <span className="beta">LAB</span>
         </a>
+        <button className="maker-credit" data-air aria-label="About the developer, Harsh Agarwal" onClick={() => setModal("about")}><span className="maker-initials">HA</span><span className="maker-name">by Harsh</span></button></div>
         <div className="top-middle">
           <span className="tiny-dot" /> A new way to make your move
         </div>
@@ -919,7 +919,7 @@ export default function AirChess() {
           AirChess <span>·</span> A small experiment in playing differently.
         </span>
         <span>
-          Built for human connection <Sparkles size={12} />
+          Built by <button className="footer-credit" data-air onClick={() => setModal("about")}>Harsh Agarwal <ArrowUpRight size={12}/></button>
         </span>
       </footer>
       {notice && (
@@ -967,7 +967,7 @@ export default function AirChess() {
           }}
         >
           <MovableSurface panelId={`dialog-${promotion ? "promotion" : modal}`} title="Dialog" enabled
-            className={`modal ${modal === "settings" ? "settings-modal" : ""}`}
+            className={`modal ${modal === "settings" ? "settings-modal" : modal === "about" ? "developer-modal" : ""}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="dialog-title"
@@ -1111,6 +1111,8 @@ export default function AirChess() {
                   <ChevronRight size={17} />
                 </button>
               </>
+            ) : modal === "about" ? (
+              <DeveloperCard/>
             ) : modal === "settings" ? (
               <>
                 <div className="eyebrow">MAKE IT YOUR SPACE</div>

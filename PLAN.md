@@ -101,4 +101,10 @@ Phase 8 checks: 36 unit tests, TypeScript validation, production build, and 12 b
 - [x] Remove the 20 FPS cap, schedule fresh camera frames without queuing, and avoid repeated chess computations/UI updates. Keep model resolution and gesture safeguards.
 - [x] Verify moved-board aiming, layout persistence/reset, modal movement, and gesture regression, including a narrow browser viewport.
 
-- [ ] Publish the tested build, verify GitHub matches, enable the user-requested public-link audience, and check hosted multiplayer.
+- [x] Publish the tested build, verify GitHub matches, enable the user-requested public-link audience, and check hosted multiplayer. Completed in release 3ba0e16.
+
+## Phase 10 — interface polish and developer signature
+- [x] Improve piece contrast and add a compact developer credit that works in focus view.
+- [x] Add a developer card linked to Harsh Agarwal's GitHub and an optional knight Easter egg.
+- [x] Check keyboard/mobile behavior, typecheck, unit tests, and production build.
+- [ ] Publish to the live Site and confirm GitHub matches.

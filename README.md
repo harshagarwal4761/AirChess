@@ -104,3 +104,7 @@ Use **Arrange layout** in the top bar. Drag a panel by its labeled handle, or ho
 The board, Air controls, Friendly match, and Move history panels save their offsets in this browser. Dialogs have their own always-visible move handles. **Reset layout** (or **Settings → Reset panel positions**) restores the default positions. Screen-edge limits keep handles reachable after resizing.
 
 The tracking readout shows processed FPS and average capture-to-result delay in milliseconds. The previous artificial 20 FPS cap has been removed; actual FPS is limited by the camera, model, GPU/CPU, and browser. Camera resolution, model, confidence thresholds, smoothing, hover duration, and pinch safeguards are retained. Nearly opaque panel blur is disabled over live video to reduce GPU work.
+
+## Developer signature
+
+AirChess is a project by **Harsh Agarwal** ([GitHub](https://github.com/harshagarwal4761)). Open the **HA / by Harsh** button in the header to see the creator card. The knight hides a small Easter egg: activate it three times. The card supports keyboard and air-button controls, and respects reduced-motion preferences. Black pieces use a contrasting outline for visibility over a transparent board.
