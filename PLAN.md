@@ -108,3 +108,20 @@ Phase 8 checks: 36 unit tests, TypeScript validation, production build, and 12 b
 - [x] Add a developer card linked to Harsh Agarwal's GitHub and an optional knight Easter egg.
 - [x] Check keyboard/mobile behavior, typecheck, unit tests, and production build.
 - [ ] Publish to the live Site and confirm GitHub matches.
+
+## Phase 11 — bug fixes, modularization, and UI overhaul
+- [x] Fix URL invite cleanup, polling fatal-error handling, `MovableSurface` scroll clamping, draw-banner z-index, captured-piece clipping, revision validation, expired-room cleanup, HiDPI skeleton canvas, hover border jitter, and stalled-frame recovery.
+- [x] Modularize `app/page.tsx` into focused board, sidebar, modal, and piece components with zero React hook lint errors.
+- [x] Replace Unicode piece glyphs with custom SVG Staunton pieces, add board themes (`emerald`, `slate`, `walnut`), interactive move-history scrubbing, material balance, local undo, persisted settings/practice state, and distinct move/capture/check sounds.
+
+## Phase 12 — Stockfish WASM AI opponent and analysis
+- [ ] Run Stockfish WASM in a Web Worker with difficulty presets so solo visitors can play against the computer with gestures or mouse.
+- [ ] Add an optional live evaluation bar and post-game best-move hints.
+
+## Phase 13 — real-time multiplayer (Durable Objects) and clocks
+- [ ] Replace HTTP polling with Cloudflare Durable Objects WebSockets with reconnect fallback and live presence.
+- [ ] Add optional blitz/rapid time controls (3+2, 5+0, 10+0) and spectator links.
+
+## Phase 14 — full-stack auth, D1 match history, and player profiles
+- [ ] Add GitHub OAuth + guest accounts with HTTP-only sessions and expanded Drizzle/D1 schema (`users`, `games`, `ratings`).
+- [ ] Add persistent match archive, replayable game URLs, and Elo/win-loss statistics.

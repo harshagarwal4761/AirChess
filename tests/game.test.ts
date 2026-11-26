@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Chess } from "chess.js";
-import { applyAction, newGame, outcome, replay } from "../lib/game";
+import { applyAction, materialSummary, newGame, outcome, replay, undoLocalMove } from "../lib/game";
 test("legal moves alternate and reject wrong player and illegal moves", () => {
   const state = applyAction(newGame(), "w", {
     type: "move",
@@ -85,4 +85,16 @@ test("resignation awards the opponent and cannot be undone", () => {
   const s = applyAction(newGame(), "b", { type: "resign" });
   assert.equal(s.result?.winner, "w");
   assert.throws(() => applyAction(s, "w", { type: "offer-draw" }), /ended/);
+});
+test("replay supports ply slicing, local undo, and material summary", () => {
+  const moves = ["e4", "d5", "exd5", "Qxd5"];
+  const mid = replay(moves, 3);
+  assert.equal(mid.get("d5")?.type, "p");
+  assert.equal(mid.get("d5")?.color, "w");
+  const summary = materialSummary(mid);
+  assert.deepEqual(summary.whiteCaptured, ["p"]);
+  assert.equal(summary.whiteAdvantage, 1);
+  assert.equal(summary.blackAdvantage, 0);
+  const undone = undoLocalMove({ ...newGame(), moves });
+  assert.deepEqual(undone.moves, ["e4", "d5", "exd5"]);
 });

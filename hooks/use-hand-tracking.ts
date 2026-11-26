@@ -80,9 +80,11 @@ export function useHandTracking(
     [handCount, setHandCount] = useState(0),
     [feedback, setFeedback] = useState<Feedback>(idleFeedback);
   const callback = useRef(onEvent);
-  callback.current = onEvent;
   const options = useRef({ reachAssist, interactionKey, mode });
-  options.current = { reachAssist, interactionKey, mode };
+  useEffect(() => {
+    callback.current = onEvent;
+    options.current = { reachAssist, interactionKey, mode };
+  }, [onEvent, reachAssist, interactionKey, mode]);
   const resources = useRef<{
     worker?: Worker;
     stream?: MediaStream;
@@ -176,6 +178,7 @@ export function useHandTracking(
         lastSeen = 0,
         lastVideo = -1,
         inFlight = false,
+        frameSentAt = 0,
         ready = false,
         count = 0,
         latencyTotal = 0,
@@ -286,9 +289,13 @@ export function useHandTracking(
         setStatus(landmarks.length ? "tracking" : "searching");
         const canvas = canvasRef.current!,
           ctx = canvas.getContext("2d")!;
-        if (canvas.width !== document.documentElement.clientWidth) canvas.width = document.documentElement.clientWidth;
-        if (canvas.height !== innerHeight) canvas.height = innerHeight;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const vw = document.documentElement.clientWidth,
+          vh = innerHeight,
+          dpr = Math.min(window.devicePixelRatio || 1, 2);
+        if (canvas.width !== Math.round(vw * dpr)) canvas.width = Math.round(vw * dpr);
+        if (canvas.height !== Math.round(vh * dpr)) canvas.height = Math.round(vh * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, vw, vh);
         const videoRect = video.getBoundingClientRect();
         const mapped = landmarks.map((hand) =>
           hand.map((p) =>
@@ -356,7 +363,7 @@ export function useHandTracking(
         if (
           lastPalm &&
           Math.hypot(palm.x - lastPalm.x, palm.y - lastPalm.y) >
-            Math.min(canvas.width, canvas.height) * 0.15
+            Math.min(vw, vh) * 0.15
         ) {
           lose();
           return;
@@ -368,13 +375,14 @@ export function useHandTracking(
         );
         const raw = options.current.reachAssist
           ? reachablePoint(points[8], {
-              width: canvas.width,
-              height: canvas.height,
+              width: vw,
+              height: vh,
             })
           : points[8];
         // A curled thumb must not freeze the cursor. Aim always follows the index.
         pointerState = followPointer(pointerState, raw, now);
         const pointer = pointerState!.point;
+        const isHover = options.current.mode === "hover";
         const element = document
           .elementFromPoint(pointer.x, pointer.y)
           ?.closest<HTMLElement>("[data-air-square]");
@@ -383,43 +391,53 @@ export function useHandTracking(
               element.dataset.airSquare!,
               element.getBoundingClientRect(),
               pointer,
+              isHover ? 0.015 : 0.06,
             )
           : null;
-        const next = advanceGesture(state, ratio, now);
-        state = next.state;
-        const stepped = stepDoublePinch(sequence, {
-          now, target, palm, edge: next.event, visible: true,
-          // Retain the pre-pinch target while the fingertip curls, not the cursor.
-          open: ratio > 0.65 && !state.pinched && !state.candidate,
-        });
-        sequence = stepped.state;
-        const hovering = hoverSelect(hover, target, now);
-        hover = hovering.state;
-        const isHover = options.current.mode === "hover";
-        const confirmed = isHover ? hovering.confirmed : stepped.confirmed;
-        const progress = isHover ? hovering.progress : sequence.count / 2;
-        const aim = isHover ? target : sequence.locked ?? sequence.hover;
+        let confirmed: string | null = null;
+        let progress = 0;
+        let cancelled = false;
+        let aim: typeof target = target;
+        if (isHover) {
+          const hovering = hoverSelect(hover, target, now);
+          hover = hovering.state;
+          confirmed = hovering.confirmed;
+          progress = hovering.progress;
+        } else {
+          const next = advanceGesture(state, ratio, now);
+          state = next.state;
+          const stepped = stepDoublePinch(sequence, {
+            now, target, palm, edge: next.event, visible: true,
+            // Retain the pre-pinch target while the fingertip curls, not the cursor.
+            open: ratio > 0.65 && !state.pinched && !state.candidate,
+          });
+          sequence = stepped.state;
+          confirmed = stepped.confirmed;
+          cancelled = stepped.cancelled;
+          progress = sequence.count / 2;
+          aim = sequence.locked ?? sequence.hover;
+        }
         const cursor = cursorRef.current!.children[0] as HTMLElement;
         cursor.style.display = "block";
         cursor.style.transform = `translate(${pointer.x}px,${pointer.y}px)`;
-        cursor.dataset.pinched = String(state.pinched);
-        cursor.dataset.progress = String(sequence.count);
+        cursor.dataset.pinched = String(!isHover && state.pinched);
+        cursor.dataset.progress = String(isHover ? 0 : sequence.count);
         cursor.style.setProperty("--air-progress", `${progress * 360}deg`);
-        const stable = Boolean(sequence.hover && now - sequence.hoverSince >= 160);
+        const stable = Boolean(!isHover && sequence.hover && now - sequence.hoverSince >= 160);
         publish({
           target: aim?.square ?? null,
           count: isHover ? 0 : sequence.count,
           ready: isHover ? Boolean(target) : stable,
           locked: !isHover && Boolean(sequence.locked),
           controllerReady: true, helper: false,
-          progress: Math.round(progress * 10) / 10, pinched: state.pinched,
+          progress: Math.round(progress * 10) / 10, pinched: !isHover && state.pinched,
           message: confirmed ? `${confirmed} confirmed. Move to your next square.`
             : isHover
               ? target ? hover.blocked === target.square
                 ? "Selected. Move to a highlighted destination."
                 : `Hold on ${target.square} · ${Math.round(progress * 10) * 10}%`
                 : "Point at a piece, then hold for the ring to fill."
-              : stepped.cancelled ? "Attempt cancelled. Aim and try again."
+              : cancelled ? "Attempt cancelled. Aim and try again."
                 : sequence.locked ? `${sequence.locked.square}: ${sequence.count}/2 pinches. Open between pinches.`
                 : stable ? `${sequence.hover!.square} ready — pinch twice.`
                 : "Point at a piece or highlighted destination, then pinch twice.",
@@ -460,12 +478,13 @@ export function useHandTracking(
         if (!ready || inFlight || document.hidden || video.readyState < 2 || mediaTime === lastVideo) return;
         lastVideo = mediaTime;
         inFlight = true;
+        frameSentAt = now;
         createImageBitmap(video)
           .then((bitmap) => {
             if (r.generation !== generation) { bitmap.close(); return; }
             worker.postMessage({ type: "frame", bitmap, timestamp: now }, [bitmap]);
           })
-          .catch(() => { inFlight = false; fail("Camera frames could not be read. Restart the camera."); });
+          .catch(() => { inFlight = false; frameSentAt = 0; fail("Camera frames could not be read. Restart the camera."); });
       };
       const hasVideoFrames = typeof video.requestVideoFrameCallback === "function";
       if (hasVideoFrames) {
@@ -480,6 +499,10 @@ export function useHandTracking(
       const tick = (now: number) => {
         if (r.generation !== generation) return;
         r.frame = requestAnimationFrame(tick);
+        if (inFlight && frameSentAt && now - frameSentAt > 2500) {
+          inFlight = false;
+          frameSentAt = 0;
+        }
         if (lastSeen && now - lastSeen > 750) { lose(); lastSeen = 0; }
         if (!hasVideoFrames) capture(now, video.currentTime);
       };

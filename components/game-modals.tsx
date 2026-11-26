@@ -1,0 +1,380 @@
+"use client";
+import type { Color } from "chess.js";
+import { ArrowUpRight, ChevronRight, Maximize2, ScanLine, Volume2, VolumeX, X } from "lucide-react";
+import { pieceNames, type Action } from "../lib/game";
+import type { BoardTheme } from "../lib/preferences";
+import { resetPanelLayout } from "../lib/panel-layout";
+import { ChessPiece } from "./chess-pieces";
+import { DeveloperCard } from "./developer-card";
+import { MovableSurface } from "./movable-surface";
+
+export type ModalKind = "join" | "help" | "settings" | "about" | "resign" | "leave" | "reset" | null;
+
+type Props = {
+  modal: ModalKind;
+  promotion: { from: string; to: string } | null;
+  turn: Color;
+  busy: boolean;
+  joinCode: string;
+  onJoinCodeChange: (code: string) => void;
+  onConnectJoin: () => void;
+  opacity: number;
+  onOpacityChange: (opacity: number) => void;
+  boardTheme: BoardTheme;
+  onBoardThemeChange: (theme: BoardTheme) => void;
+  cameraActive: boolean;
+  onRecalibrate: () => void;
+  reachAssist: boolean;
+  onToggleReachAssist: () => void;
+  inRoom: boolean;
+  followTurn: boolean;
+  onToggleFollowTurn: () => void;
+  muted: boolean;
+  onToggleMuted: () => void;
+  focusMode: boolean;
+  onToggleFocusMode: () => void;
+  onNotice: (message: string) => void;
+  onClose: () => void;
+  onAction: (action: Action) => void;
+  onLeaveRoom: () => void;
+  onResetPractice: () => void;
+};
+
+const themes: { id: BoardTheme; label: string }[] = [
+  { id: "emerald", label: "Emerald" },
+  { id: "slate", label: "Slate" },
+  { id: "walnut", label: "Walnut" },
+];
+
+export function GameModals({
+  modal,
+  promotion,
+  turn,
+  busy,
+  joinCode,
+  onJoinCodeChange,
+  onConnectJoin,
+  opacity,
+  onOpacityChange,
+  boardTheme,
+  onBoardThemeChange,
+  cameraActive,
+  onRecalibrate,
+  reachAssist,
+  onToggleReachAssist,
+  inRoom,
+  followTurn,
+  onToggleFollowTurn,
+  muted,
+  onToggleMuted,
+  focusMode,
+  onToggleFocusMode,
+  onNotice,
+  onClose,
+  onAction,
+  onLeaveRoom,
+  onResetPractice,
+}: Props) {
+  if (!modal && !promotion) return null;
+
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !promotion) onClose();
+      }}
+    >
+      <MovableSurface
+        panelId={`dialog-${promotion ? "promotion" : modal}`}
+        title="Dialog"
+        enabled
+        className={`modal ${modal === "settings" ? "settings-modal" : modal === "about" ? "developer-modal" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dialog-title"
+      >
+        <button
+          type="button"
+          className="icon-button modal-close"
+          data-air
+          aria-label="Close dialog"
+          onClick={onClose}
+        >
+          <X size={20} />
+        </button>
+
+        {promotion ? (
+          <>
+            <div className="eyebrow">A NEW CHAPTER</div>
+            <h2 id="dialog-title">Choose your promotion.</h2>
+            <p>Your pawn reached the other side. Pick the piece it becomes.</p>
+            <div className="promotion-options">
+              {["q", "r", "b", "n"].map((type) => (
+                <button
+                  type="button"
+                  key={type}
+                  className="promotion-piece"
+                  data-air
+                  disabled={busy}
+                  onClick={() => onAction({ type: "move", ...promotion, promotion: type })}
+                >
+                  <ChessPiece type={type} color={turn} />
+                  <span>{pieceNames[type]}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : modal === "join" ? (
+          <>
+            <div className="eyebrow">TAKE YOUR SEAT</div>
+            <h2 id="dialog-title">Join your friend.</h2>
+            <p>Enter their six-digit room code. You’ll play Black.</p>
+            <input
+              className="code-input"
+              aria-label="Six-digit room code"
+              inputMode="numeric"
+              maxLength={6}
+              value={joinCode}
+              onChange={(e) => onJoinCodeChange(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="000000"
+            />
+            <div className="keypad">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "Clear", "0", "⌫"].map((key) => (
+                <button
+                  type="button"
+                  className="button secondary"
+                  data-air
+                  key={key}
+                  onClick={() =>
+                    onJoinCodeChange(
+                      key === "Clear"
+                        ? ""
+                        : key === "⌫"
+                          ? joinCode.slice(0, -1)
+                          : (joinCode + key).slice(0, 6),
+                    )
+                  }
+                >
+                  {key}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="button primary full"
+              data-air
+              disabled={joinCode.length !== 6 || busy}
+              onClick={onConnectJoin}
+            >
+              {busy ? "Joining…" : "Join game"}
+              <ArrowUpRight size={17} />
+            </button>
+          </>
+        ) : modal === "help" ? (
+          <>
+            <div className="eyebrow">YOUR FIRST AIR MOVE</div>
+            <h2 id="dialog-title">A board. A hand. That’s it.</h2>
+            <div className="help-steps">
+              <p>
+                <b>1. Choose a control hand.</b> Show just one open hand for a moment. It becomes
+                your only move controller; the second hand never selects squares.
+              </p>
+              <p>
+                <b>2. Select your piece.</b> Point at your piece and keep the cursor inside its
+                square until the ring fills (1.1 seconds). Steady hover needs no pinching. Move away
+                to cancel the countdown.
+              </p>
+              <p>
+                <b>3. Choose the destination.</b> Move to a highlighted legal square and hold again.
+                Raise your second open palm to pause; lower it to resume. A tracking interruption
+                keeps your selected piece, but restarts the confirmation countdown.
+              </p>
+              <p>
+                <b>4. Use the menus.</b> Hold an open fingertip over a button for 1.3 seconds. You
+                can join a room with the on-screen keypad, choose promotions, and request a rematch
+                this way.
+              </p>
+            </div>
+            <div className="help-note">
+              Double pinch is also available in the Air controls panel: close/open twice on the
+              piece, then twice on its destination. Your control hand plays both colors in local
+              practice, which follows the active side by default. Reach assist brings far squares
+              within a smaller hand movement. In a room, each laptop controls its own color. Casual
+              games are untimed; repetition and fifty-move draws are automatic.
+            </div>
+            <button type="button" className="button primary full" data-air onClick={onClose}>
+              Let’s play
+              <ChevronRight size={17} />
+            </button>
+          </>
+        ) : modal === "about" ? (
+          <DeveloperCard />
+        ) : modal === "settings" ? (
+          <>
+            <div className="eyebrow">MAKE IT YOUR SPACE</div>
+            <h2 id="dialog-title">A clearer view.</h2>
+            <p>Adjust the board to suit your room and lighting.</p>
+
+            <div className="setting-label">
+              <span>Board theme</span>
+            </div>
+            <div className="theme-picker" role="group" aria-label="Board theme">
+              {themes.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`theme-chip ${boardTheme === t.id ? "active" : ""}`}
+                  data-air
+                  aria-pressed={boardTheme === t.id}
+                  onClick={() => onBoardThemeChange(t.id)}
+                >
+                  <span className={`theme-swatch theme-${t.id}`} />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <label className="setting-label" htmlFor="board-transparency">
+              Board transparency <span>{Math.round((1 - opacity) * 100)}%</span>
+            </label>
+            <input
+              id="board-transparency"
+              className="transparency-slider"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={Math.round((1 - opacity) * 100)}
+              onChange={(e) => onOpacityChange(1 - Number(e.target.value) / 100)}
+            />
+            <div className="range-labels">
+              <span>Solid board</span>
+              <span>Clear board</span>
+            </div>
+            <div className="opacity-adjustments">
+              {[-5, -1, 1, 5].map((step) => (
+                <button
+                  type="button"
+                  className="button secondary"
+                  key={step}
+                  data-air
+                  aria-label={`${step > 0 ? "Increase" : "Decrease"} transparency by ${Math.abs(step)} percent`}
+                  disabled={step > 0 ? opacity === 0 : opacity === 1}
+                  onClick={() => onOpacityChange(opacity - step / 100)}
+                >
+                  {step > 0 ? "+" : ""}
+                  {step}%
+                </button>
+              ))}
+            </div>
+            <p className="small-note">
+              Use Arrange layout to drag panels or move them with the arrow buttons. Your positions
+              are saved on this browser.
+            </p>
+            <p className="small-note">
+              Pieces stay visible even at 100% transparency. All settings are saved locally.
+            </p>
+            <button type="button" className="button secondary full setting-button" data-air onClick={resetPanelLayout}>
+              Reset panel positions
+            </button>
+            {cameraActive && (
+              <button
+                type="button"
+                className="button secondary full setting-button"
+                data-air
+                onClick={() => {
+                  onRecalibrate();
+                  onClose();
+                }}
+              >
+                Choose control hand again
+              </button>
+            )}
+            <button type="button" className="button secondary full setting-button" data-air onClick={onToggleReachAssist}>
+              Expanded reach: {reachAssist ? "on · cursor offset" : "off · direct aim"}
+            </button>
+            {!inRoom && (
+              <button type="button" className="button secondary full setting-button" data-air onClick={onToggleFollowTurn}>
+                Follow active side: {followTurn ? "on" : "off"}
+              </button>
+            )}
+            <button type="button" className="button secondary full setting-button" data-air onClick={onToggleMuted}>
+              {muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
+              Move sounds: {muted ? "off" : "on"}
+            </button>
+            <button
+              type="button"
+              className="button secondary full setting-button"
+              data-air
+              onClick={() => {
+                onToggleFocusMode();
+                onClose();
+              }}
+            >
+              <ScanLine size={17} />
+              {focusMode ? "Exit focus view" : "Focus view · fit board to screen"}
+            </button>
+            <button
+              type="button"
+              className="button secondary full"
+              data-air
+              onClick={() => {
+                if (document.fullscreenElement) void document.exitFullscreen();
+                else
+                  void document.documentElement
+                    .requestFullscreen()
+                    .catch(() => onNotice("Use your browser’s fullscreen shortcut."));
+              }}
+            >
+              <Maximize2 size={17} />
+              Toggle fullscreen
+            </button>
+            <p className="small-note">
+              Camera frames are processed on this device. Only room actions and chess moves are
+              sent to the game server.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="eyebrow">ONE QUICK CHECK</div>
+            <h2 id="dialog-title">
+              {modal === "resign"
+                ? "Resign this game?"
+                : modal === "leave"
+                  ? "Leave the room?"
+                  : "Start a fresh board?"}
+            </h2>
+            <p>
+              {modal === "resign"
+                ? "Your friend will win by resignation. You can both request a rematch afterward."
+                : modal === "leave"
+                  ? "An active game will remain in the room. Keep the room code if you want to rejoin in this tab."
+                  : "This clears your practice game. Export your moves first if you want to keep them."}
+            </p>
+            <div className="button-row">
+              <button type="button" className="button secondary" data-air onClick={onClose}>
+                Go back
+              </button>
+              <button
+                type="button"
+                className="button primary"
+                data-air
+                onClick={() => {
+                  if (modal === "leave") onLeaveRoom();
+                  else if (modal === "resign") {
+                    onAction({ type: "resign" });
+                    onClose();
+                  } else {
+                    onResetPractice();
+                  }
+                }}
+              >
+                {modal === "resign" ? "Resign game" : modal === "leave" ? "Leave room" : "New game"}
+              </button>
+            </div>
+          </>
+        )}
+      </MovableSurface>
+    </div>
+  );
+}

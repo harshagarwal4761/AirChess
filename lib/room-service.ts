@@ -1,5 +1,5 @@
 import type { Color } from "chess.js";
-import { eq, and } from "drizzle-orm";
+import { eq, and, lt } from "drizzle-orm";
 import { getDb } from "../db";
 import { rooms } from "../db/schema";
 import { applyAction, newGame, type Action, type RoomState } from "./game";
@@ -46,6 +46,9 @@ function view(row: typeof rooms.$inferSelect, key: string) {
 }
 export async function createRoom(key: string) {
   const db = getDb();
+  const now = Date.now();
+  // Best-effort purge of expired rooms so D1 stays bounded.
+  await db.delete(rooms).where(lt(rooms.updatedAt, now - lifetime)).catch(() => {});
   for (let i = 0; i < 6; i++) {
     const random = new Uint32Array(1);
     crypto.getRandomValues(random);
@@ -55,8 +58,8 @@ export async function createRoom(key: string) {
       white: key,
       state: JSON.stringify(newGame()),
       revision: 0,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
     };
     const inserted = await db
       .insert(rooms)
@@ -96,6 +99,8 @@ export async function roomRequest(
   if (body.type !== "action" || !body.action)
     throw new RoomError("Unknown room action.");
   if (!current.ready) throw new RoomError("Wait for your friend to join.");
+  if (typeof body.revision !== "number" || !Number.isInteger(body.revision) || body.revision < 0)
+    throw new RoomError("Invalid room revision.");
   if (body.revision !== row.revision)
     throw new RoomError(
       "The board changed. Wait for it to sync and try again.",
@@ -140,7 +145,8 @@ export async function respond(fn: () => Promise<unknown>) {
 }
 export async function readBody(request: Request) {
   const text = await request.text();
-  if (text.length > 2048) throw new RoomError("Request too large.", 413);
+  if (new TextEncoder().encode(text).length > 2048)
+    throw new RoomError("Request too large.", 413);
   try {
     const body = JSON.parse(text);
     if (!body || typeof body !== "object") throw new Error();

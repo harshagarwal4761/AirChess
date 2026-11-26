@@ -103,8 +103,8 @@ export function centerTarget(
   square: string,
   rect: { left: number; top: number; width: number; height: number },
   point: Point,
+  margin = 0.06,
 ): Target | null {
-  const margin = 0.06;
   if (
     point.x < rect.left + rect.width * margin ||
     point.x > rect.left + rect.width * (1 - margin) ||

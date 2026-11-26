@@ -108,6 +108,7 @@ test("center targeting rejects square borders rather than snapping to a neighbor
   const rect = { left: 0, top: 0, width: 100, height: 100 };
   assert.equal(centerTarget("e2", rect, { x: 2, y: 50 }), null);
   assert.equal(centerTarget("e2", rect, { x: 98, y: 50 }), null);
+  assert.equal(centerTarget("e2", rect, { x: 2, y: 50 }, 0.015)?.square, "e2");
   assert.equal(centerTarget("e2", rect, { x: 50, y: 50 })?.square, "e2");
 });
 test("the support hand never becomes controller when the controller disappears", () => {

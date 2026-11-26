@@ -10,10 +10,47 @@ export type RoomState = {
 export function newGame(game = 1): RoomState {
   return { moves: [], result: null, drawOffer: null, rematch: null, game };
 }
-export function replay(moves: string[]) {
+export function replay(moves: string[], ply = moves.length) {
   const chess = new Chess();
-  for (const move of moves) chess.move(move);
+  const limit = Math.max(0, Math.min(moves.length, ply));
+  for (let i = 0; i < limit; i++) chess.move(moves[i]);
   return chess;
+}
+export function undoLocalMove(state: RoomState): RoomState {
+  if (!state.moves.length) return state;
+  return {
+    ...state,
+    moves: state.moves.slice(0, -1),
+    result: null,
+    drawOffer: null,
+    rematch: null,
+  };
+}
+const pieceValues: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const captureOrder: Record<string, number> = { q: 0, r: 1, b: 2, n: 3, p: 4 };
+export function materialSummary(chess: Chess) {
+  let white = 0;
+  let black = 0;
+  for (const row of chess.board()) {
+    for (const cell of row) {
+      if (!cell) continue;
+      if (cell.color === "w") white += pieceValues[cell.type] ?? 0;
+      else black += pieceValues[cell.type] ?? 0;
+    }
+  }
+  const diff = white - black;
+  const history = chess.history({ verbose: true });
+  const captured = (color: Color) =>
+    history
+      .filter((m) => m.color === color && m.captured)
+      .map((m) => m.captured!)
+      .sort((a, b) => (captureOrder[a] ?? 9) - (captureOrder[b] ?? 9));
+  return {
+    whiteCaptured: captured("w"),
+    blackCaptured: captured("b"),
+    whiteAdvantage: diff > 0 ? diff : 0,
+    blackAdvantage: diff < 0 ? -diff : 0,
+  };
 }
 export function outcome(chess: Chess): Result | null {
   if (chess.isCheckmate())

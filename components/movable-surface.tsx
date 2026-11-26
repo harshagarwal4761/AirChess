@@ -1,28 +1,45 @@
 "use client";
-import { useEffect, useRef, type HTMLAttributes, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, type HTMLAttributes, type PointerEvent } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, GripHorizontal } from "lucide-react";
 import { clampPanel, LAYOUT_PREFIX, readOffset, type Offset } from "../lib/panel-layout";
 
 type Props = HTMLAttributes<HTMLElement> & { panelId: string; title: string; enabled: boolean; as?: "div" | "section" };
+const changed = () => window.dispatchEvent(new Event("airchess-layout-change"));
 export function MovableSurface({ panelId, title, enabled, as: Tag = "section", className = "", children, ...props }: Props) {
   const element = useRef<HTMLElement | null>(null);
   const offset = useRef<Offset>({ x: 0, y: 0 });
   const drag = useRef<{ pointerId: number; x: number; y: number; origin: Offset } | null>(null);
-  const changed = () => window.dispatchEvent(new Event("airchess-layout-change"));
   const persist = () => {
     try { localStorage.setItem(LAYOUT_PREFIX + panelId, JSON.stringify(offset.current)); } catch { /* Optional preference. */ }
   };
-  const apply = (next: Offset, constrain = true) => {
+  const apply = useCallback((next: Offset, constrain = true) => {
     const node = element.current;
     if (!node) return;
     const rect = node.getBoundingClientRect();
-    const base = { left: rect.left - offset.current.x, top: rect.top - offset.current.y, width: rect.width, height: rect.height };
-    const headerBottom = panelId.startsWith("dialog-") ? 0 : Math.max(0, document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0);
+    const isDialog = panelId.startsWith("dialog-");
+    const scrollY = isDialog ? 0 : window.scrollY;
+    const scrollX = isDialog ? 0 : window.scrollX;
+    const base = {
+      left: rect.left + scrollX - offset.current.x,
+      top: rect.top + scrollY - offset.current.y,
+      width: rect.width,
+      height: rect.height,
+    };
+    const headerBottom = isDialog ? 0 : Math.max(0, (document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0) + scrollY);
     const previous = offset.current;
-    offset.current = constrain ? clampPanel(next, { ...base, top: base.top - headerBottom }, { width: document.documentElement.clientWidth, height: innerHeight - headerBottom }) : next;
+    offset.current = constrain
+      ? clampPanel(
+          next,
+          { ...base, top: base.top - headerBottom },
+          {
+            width: scrollX + document.documentElement.clientWidth,
+            height: scrollY + innerHeight - headerBottom,
+          },
+        )
+      : next;
     node.style.transform = `translate3d(${offset.current.x}px, ${offset.current.y}px, 0)`;
     if (Math.abs(previous.x - offset.current.x) > 0.1 || Math.abs(previous.y - offset.current.y) > 0.1) changed();
-  };
+  }, [panelId]);
   const raise = () => {
     document.querySelectorAll<HTMLElement>("[data-movable]").forEach(node => { node.style.zIndex = "10"; });
     if (element.current) element.current.style.zIndex = "30";
@@ -33,7 +50,11 @@ export function MovableSurface({ panelId, title, enabled, as: Tag = "section", c
     // Let the parent restore its saved focus view before measuring the layout.
     const restoreFrame = requestAnimationFrame(() => apply(saved, Boolean(saved.x || saved.y)));
     const reset = () => { apply({ x: 0, y: 0 }, false); };
-    const reflow = () => { if (offset.current.x || offset.current.y) apply(offset.current); };
+    const reflow = () => {
+      if ((offset.current.x || offset.current.y) && (panelId.startsWith("dialog-") || window.scrollY === 0)) {
+        apply(offset.current);
+      }
+    };
     const resized = () => { reflow(); changed(); };
     const observer = new ResizeObserver(reflow);
     if (element.current) observer.observe(element.current);
@@ -46,7 +67,7 @@ export function MovableSurface({ panelId, title, enabled, as: Tag = "section", c
       window.removeEventListener("airchess-layout-reset", reset);
       if (drag.current) delete document.documentElement.dataset.layoutDragging;
     };
-  }, [panelId]);
+  }, [panelId, apply]);
   const start = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
