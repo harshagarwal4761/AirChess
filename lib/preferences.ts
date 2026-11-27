@@ -5,6 +5,9 @@ import type { DifficultyPreset } from "./stockfish";
 
 export type BoardTheme = "emerald" | "slate" | "walnut";
 export type PlayMode = "practice" | "ai";
+export type TrackingDelegateMode = "auto" | "GPU" | "CPU";
+export type TrackingResolution = "fast" | "balanced";
+export type HoverSpeed = "standard" | "fast";
 
 export type Preferences = {
   opacity: number;
@@ -20,6 +23,9 @@ export type Preferences = {
   showEval: boolean;
   twoHandPause: boolean;
   timeControl: TimeControlId;
+  trackingDelegate: TrackingDelegateMode;
+  trackingResolution: TrackingResolution;
+  hoverSpeed: HoverSpeed;
 };
 
 export const defaultPreferences: Preferences = {
@@ -36,6 +42,9 @@ export const defaultPreferences: Preferences = {
   showEval: false,
   twoHandPause: false,
   timeControl: "untimed",
+  trackingDelegate: "auto",
+  trackingResolution: "fast",
+  hoverSpeed: "standard",
 };
 
 const PRACTICE_KEY = "airchess.practice.v1";
@@ -81,6 +90,12 @@ export function readPreferences(): Preferences {
     showEval: safeGet("airchess.showEval") === "true",
     twoHandPause: safeGet("airchess.twoHandPause") === "true",
     timeControl: tc && tc in TIME_CONTROLS ? tc : "untimed",
+    trackingDelegate: (() => {
+      const d = safeGet("airchess.trackingDelegate");
+      return d === "GPU" || d === "CPU" ? d : "auto";
+    })(),
+    trackingResolution: safeGet("airchess.trackingResolution") === "balanced" ? "balanced" : "fast",
+    hoverSpeed: safeGet("airchess.hoverSpeed") === "fast" ? "fast" : "standard",
   };
 }
 

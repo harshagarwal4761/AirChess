@@ -16,15 +16,15 @@ Keep this file updated as features land so every bullet is backed by actual impl
 - **Implemented server-authoritative blitz/rapid chess clocks (`3+2`, `5+0`, `10+0`)**, calculating elapsed turn time from server timestamps (`serverNow` clock-skew sync), increment application, and CAS-protected timeout adjudication (`flag` action + insufficient-material draw check).
 
 ### Computer Vision & Real-Time Performance
-- **Integrated MediaPipe Hand Landmarker (21 3D keypoints) inside a dedicated Web Worker** to keep webcam inference off the UI thread, processing live frames without queuing (`requestVideoFrameCallback` + stalled-frame watchdog) with GPU/CPU fallback and zero server-side camera uploads.
-- **Improved real-time air cursor stability and throughput** by replacing naive EMA smoothing with an adaptive **One-Euro (1€) filter**, adding square-border hysteresis and single-frame flicker tolerance, defaulting to single-hand ROI tracking (`numHands: 1` for higher frame rates on integrated GPUs), and validating camera-to-screen projection across mirrored/cropped viewports.
+- **Integrated MediaPipe Hand Landmarker (21 3D keypoints) inside a dedicated Web Worker with live GPU-vs-CPU auto-benchmarking** to keep webcam inference off the UI thread; measures actual worker `detectForVideo` inference latency over warmup/sample frames, automatically switches integrated-GPU devices exceeding 50 ms/frame to SIMD WASM CPU when faster, caches the winning delegate (`Auto / GPU / CPU`), downscales high-res feeds to `384p` (`Fast`) or `512p` (`Crisp`) via `createImageBitmap`, and exposes a Settings engine/resolution selector.
+- **Engineered rock-steady air cursor stability & zero-reflow rendering**, upgrading the One-Euro (`1€`) filter with sub-2.2 px stationary tremor damping, adding dt-scaled palm-jump thresholds (preventing false tracking drops during fast hand swipes at 12–15 FPS), single-hand handedness-flicker immunity (`280 ms` dropout hold), 12% sticky hover square hysteresis on seams, batched single-path 2D skeleton drawing, cached video geometry, and `translate3d` GPU cursor compositing.
 
 ### WebAssembly Chess Engine & Analysis
 - **Embedded a single-threaded Stockfish WebAssembly chess engine in a Web Worker** with configurable difficulty presets (`Casual`, `Club`, `Master`), UCI score normalization (`cp` and `mate` mapped to White's perspective), a live evaluation meter, and best-move hints automatically restricted during active multiplayer games.
 
 ### Frontend Architecture, Accessibility & UX
 - **Modularized a 1,200+ line client page into memoized React components (`ChessBoard`, `SidebarPanels`, `MatchClock`)** with zero ESLint/React Compiler issues, eliminating 10 Hz full-tree re-renders during timed games by isolating clock ticks and using single-shot timeout scheduling; added custom Staunton SVG pieces, 3 themes with 0–100% camera overlay transparency, draggable/nudgeable floating panels, ECO opening detection (`lib/openings.ts`), FEN/PGN copy & export, move scrubbing, keyboard shortcuts, and custom error/404 boundaries.
-- **Hardened full-stack reliability with sliding-window IP rate limiting (`429` + `Retry-After`), constant-time unknown-user login verification, opportunistic D1 session pruning, single-query SSE delta reads (`readRoomIfNewer`), and `GET /api/health`**, backed by `npm run check` (**52 automated unit tests** + lint + typecheck + production build) and end-to-end HTTP+D1 integration tests (`AIRCHESS_TEST_URL=... npm run test:integration`).
+- **Hardened full-stack reliability with sliding-window IP rate limiting (`429` + `Retry-After`), constant-time unknown-user login verification, opportunistic D1 session pruning, single-query SSE delta reads (`readRoomIfNewer`), and `GET /api/health`**, backed by `npm run check` (**55 automated unit tests** + lint + typecheck + production build) and end-to-end HTTP+D1 integration tests (`AIRCHESS_TEST_URL=... npm run test:integration`).
 
 ---
 
@@ -34,5 +34,5 @@ Keep this file updated as features land so every bullet is backed by actual impl
 
 ---
 
-## Upcoming Additions
-- **Final Tracking Polish (Next):** Real-camera latency/FPS profiling and final webcam tracking accuracy tuning.
+## Verified Status
+- All core features across Phases 1–16 (Playable AI, Real-Time SSE + Clocks + Spectators, PBKDF2 Auth + D1 Archives + Elo, Repo Hardening, and Final Webcam Auto-Benchmark & Stability Pass) are implemented, checked via `npm run check`, and pushed cleanly to GitHub.

@@ -6,7 +6,12 @@ import type { PublicUser } from "../lib/auth";
 import { pieceNames, type Action } from "../lib/game";
 import type { RecordedGestureSample } from "../lib/gesture-classifier";
 import type { GestureLabel } from "../lib/gesture-features";
-import type { BoardTheme } from "../lib/preferences";
+import type {
+  BoardTheme,
+  HoverSpeed,
+  TrackingDelegateMode,
+  TrackingResolution,
+} from "../lib/preferences";
 import { resetPanelLayout } from "../lib/panel-layout";
 import { ChessPiece } from "./chess-pieces";
 import { DeveloperCard } from "./developer-card";
@@ -50,6 +55,12 @@ type Props = {
   onToggleEval: () => void;
   twoHandPause: boolean;
   onToggleTwoHandPause: () => void;
+  trackingDelegate: TrackingDelegateMode;
+  onChangeTrackingDelegate: (mode: TrackingDelegateMode) => void;
+  trackingResolution: TrackingResolution;
+  onChangeTrackingResolution: (res: TrackingResolution) => void;
+  hoverSpeed: HoverSpeed;
+  onChangeHoverSpeed: (speed: HoverSpeed) => void;
   focusMode: boolean;
   onToggleFocusMode: () => void;
   onNotice: (message: string) => void;
@@ -95,6 +106,12 @@ export function GameModals({
   onToggleEval,
   twoHandPause,
   onToggleTwoHandPause,
+  trackingDelegate,
+  onChangeTrackingDelegate,
+  trackingResolution,
+  onChangeTrackingResolution,
+  hoverSpeed,
+  onChangeHoverSpeed,
   focusMode,
   onToggleFocusMode,
   onNotice,
@@ -385,6 +402,61 @@ export function GameModals({
             <button type="button" className="button secondary full setting-button" data-air onClick={onToggleTwoHandPause}>
               Two-hand palm pause: {twoHandPause ? "on · slower" : "off · faster FPS"}
             </button>
+            <div className="setting-label">
+              <span>Tracking engine</span>
+              <strong>{trackingDelegate === "auto" ? "Auto" : trackingDelegate}</strong>
+            </div>
+            <div className="ai-row setting-button" role="group" aria-label="Tracking engine">
+              {(["auto", "GPU", "CPU"] as TrackingDelegateMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`mini-chip ${trackingDelegate === mode ? "active" : ""}`}
+                  aria-pressed={trackingDelegate === mode}
+                  onClick={() => onChangeTrackingDelegate(mode)}
+                >
+                  {mode === "auto" ? "Auto (Fastest)" : mode === "CPU" ? "CPU (WASM)" : "GPU"}
+                </button>
+              ))}
+            </div>
+            <div className="setting-label">
+              <span>Capture speed &amp; hover dwell</span>
+              <strong>{trackingResolution === "fast" ? "384p" : "512p"} · {hoverSpeed === "fast" ? "0.7s" : "1.1s"}</strong>
+            </div>
+            <div className="ai-row setting-button" role="group" aria-label="Tracking capture resolution and hover speed">
+              <button
+                type="button"
+                className={`mini-chip ${trackingResolution === "fast" ? "active" : ""}`}
+                aria-pressed={trackingResolution === "fast"}
+                onClick={() => onChangeTrackingResolution("fast")}
+              >
+                Fast (384p)
+              </button>
+              <button
+                type="button"
+                className={`mini-chip ${trackingResolution === "balanced" ? "active" : ""}`}
+                aria-pressed={trackingResolution === "balanced"}
+                onClick={() => onChangeTrackingResolution("balanced")}
+              >
+                Crisp (512p)
+              </button>
+              <button
+                type="button"
+                className={`mini-chip ${hoverSpeed === "standard" ? "active" : ""}`}
+                aria-pressed={hoverSpeed === "standard"}
+                onClick={() => onChangeHoverSpeed("standard")}
+              >
+                Hover 1.1s
+              </button>
+              <button
+                type="button"
+                className={`mini-chip ${hoverSpeed === "fast" ? "active" : ""}`}
+                aria-pressed={hoverSpeed === "fast"}
+                onClick={() => onChangeHoverSpeed("fast")}
+              >
+                Fast 0.7s
+              </button>
+            </div>
             <button
               type="button"
               className="button secondary full setting-button"

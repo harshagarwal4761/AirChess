@@ -3,7 +3,7 @@
 ## Automated suites
 
 - **`npm run check`**: Runs ESLint (zero errors across client, API, workers, and tests), `tsc --noEmit`, `npm test`, and the production Vinext/Cloudflare build.
-- **`npm test` (52 unit tests via `tsx --test tests/*.test.ts`)**:
+- **`npm test` (55 unit tests via `tsx --test tests/*.test.ts`)**:
   - `tests/game.test.ts`: Legal turns, castling, en passant, 4-piece promotion, checkmate, stalemate, insufficient-material/fifty-move/repetition draws, mutual draws/rematches, resignation, local undo, material summary, timed clock deductions, increments, and timeout adjudication.
   - `tests/gesture-classifier.test.ts`: Custom 2-layer MLP gesture classification (`open`, `pinch`, `fist`, `peace`) under tilt/mirroring + `GestureSmoother` hysteresis.
   - `tests/double-pinch.test.ts`, `tests/gestures.test.ts`, `tests/air-pointer.test.ts`: Video-rectangle coordinate projection, One-Euro pointer tracking, hover countdown & repeat latching, pinch hysteresis, tracking-loss retention/cancellation.

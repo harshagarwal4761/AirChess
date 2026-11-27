@@ -12,7 +12,7 @@ Always distinguish between external pretrained/engine dependencies (MediaPipe ke
 2. Switch between **vs Stockfish WASM** (evaluation bar + best-move hint) and **Online** rooms (`3+2` clock, SSE instant sync, spectator `?watch=1` link).
 3. Show ECO opening detection, move-history scrubbing, Copy FEN/PGN, and keyboard shortcuts (`?`).
 4. Sign in via **Profile**, play or review an archived game (`/?game=<id>`), and inspect the Elo leaderboard.
-5. Mention the `npm run check` (52 unit tests) and D1 integration test suite.
+5. Mention the `npm run check` (55 unit tests) and D1 integration test suite.
 
 ## Questions worth being able to answer
 

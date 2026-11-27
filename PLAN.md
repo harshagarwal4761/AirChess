@@ -134,5 +134,8 @@ Phase 8 checks: 36 unit tests, TypeScript validation, production build, and 12 b
 - [x] Improve React performance & chess UX: isolate 100 ms ticks in `<MatchClock>` with single-shot auto-flag scheduling (eliminating 10 Hz root re-renders), memoize `ChessBoard` & `SidebarPanels`, add ECO opening detection (`lib/openings.ts`), Copy FEN/PGN buttons, auto-scrolling move list, keyboard shortcuts, `app/error.tsx` & `app/not-found.tsx`, OpenGraph metadata, and Settings gesture sample capture/export.
 - [x] Refresh `README.md`, `docs/ARCHITECTURE.md`, `docs/TESTING.md`, `docs/PORTFOLIO.md`, and `RESUME_POINTS.md` to reflect Phases 11–15 accurately.
 
-## Next — final webcam tracking pass
-- [ ] Run real-webcam FPS/latency/accuracy profiling across lighting/angles and perform the final air-tracking tuning pass.
+## Phase 16 — final webcam tracking speed & stability overhaul
+- [x] Add automatic GPU-vs-CPU WASM delegate benchmarking in `workers/hand-tracking.worker.ts` & `hooks/use-hand-tracking.ts` (caching fastest hardware backend locally, plus manual `Auto / GPU / CPU` selector in Settings).
+- [x] Downscale worker frames via `createImageBitmap` (`384p` Fast default / `512p` Crisp toggle), cache video/viewport rects to eliminate per-frame forced reflows, batch skeleton canvas strokes into one path per hand, and use `translate3d` cursor updates.
+- [x] Fix major tracking stability flaws: scale palm-jump thresholds by elapsed frame `dt` (`exceededPalmJump`), immunize 1-hand mode against brief MediaPipe Left/Right handedness flips (`resolveControllerHand` + `280 ms` flicker tolerance), add sub-2.2 px tremor damping to the One-Euro filter, widen hover seam hysteresis (`12%`), and add `1.1s / 0.7s` hover dwell toggle.
+- [x] Add unit regressions in `tests/air-pointer.test.ts` and verify full checks, browser UI, and GitHub sync.

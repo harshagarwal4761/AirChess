@@ -164,10 +164,16 @@ export const SidebarPanels = memo(function SidebarPanels({
     const box = moveScrollRef.current;
     if (!box) return;
     const active = box.querySelector<HTMLElement>(".active-ply");
-    if (active && typeof active.scrollIntoView === "function") {
-      active.scrollIntoView({ block: "nearest" });
-    } else {
+    if (!active) {
       box.scrollTop = box.scrollHeight;
+      return;
+    }
+    const top = active.offsetTop - box.offsetTop;
+    const bottom = top + active.offsetHeight;
+    if (top < box.scrollTop) {
+      box.scrollTop = top;
+    } else if (bottom > box.scrollTop + box.clientHeight) {
+      box.scrollTop = bottom - box.clientHeight;
     }
   }, [viewPly, totalPlies]);
 

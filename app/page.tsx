@@ -31,7 +31,10 @@ import {
   safeSet,
   writePracticeState,
   type BoardTheme,
+  type HoverSpeed,
   type PlayMode,
+  type TrackingDelegateMode,
+  type TrackingResolution,
 } from "../lib/preferences";
 import { playChessSound, type SoundKind } from "../lib/sound";
 import { DIFFICULTY_PRESETS, type DifficultyPreset } from "../lib/stockfish";
@@ -96,6 +99,13 @@ export default function AirChess() {
   const [aiColor, setAiColor] = useState<Color>(defaultPreferences.aiColor);
   const [showEval, setShowEval] = useState(defaultPreferences.showEval);
   const [twoHandPause, setTwoHandPause] = useState(defaultPreferences.twoHandPause);
+  const [trackingDelegate, setTrackingDelegate] = useState<TrackingDelegateMode>(
+    defaultPreferences.trackingDelegate,
+  );
+  const [trackingResolution, setTrackingResolution] = useState<TrackingResolution>(
+    defaultPreferences.trackingResolution,
+  );
+  const [hoverSpeed, setHoverSpeed] = useState<HoverSpeed>(defaultPreferences.hoverSpeed);
   const [hintVisible, setHintVisible] = useState(false);
   const [flipped, setFlipped] = useState(false);
   const [focusMode, setFocusMode] = useState(defaultPreferences.focusMode);
@@ -205,12 +215,24 @@ export default function AirChess() {
       return !v;
     });
   }, []);
-  function toggleTwoHandPause() {
+  const toggleTwoHandPause = useCallback(() => {
     setTwoHandPause((v) => {
       safeSet("airchess.twoHandPause", String(!v));
       return !v;
     });
-  }
+  }, []);
+  const changeTrackingDelegate = useCallback((value: TrackingDelegateMode) => {
+    setTrackingDelegate(value);
+    safeSet("airchess.trackingDelegate", value);
+  }, []);
+  const changeTrackingResolution = useCallback((value: TrackingResolution) => {
+    setTrackingResolution(value);
+    safeSet("airchess.trackingResolution", value);
+  }, []);
+  const changeHoverSpeed = useCallback((value: HoverSpeed) => {
+    setHoverSpeed(value);
+    safeSet("airchess.hoverSpeed", value);
+  }, []);
   function toggleReachAssist() {
     setReachAssist((v) => {
       safeSet("airchess.reachAssist", String(!v));
@@ -440,6 +462,9 @@ export default function AirChess() {
       setAiColor(prefs.aiColor);
       setShowEval(prefs.showEval);
       setTwoHandPause(prefs.twoHandPause);
+      setTrackingDelegate(prefs.trackingDelegate);
+      setTrackingResolution(prefs.trackingResolution);
+      setHoverSpeed(prefs.hoverSpeed);
       setLocal(savedPractice);
       practiceLoadedRef.current = true;
       if (replayId && /^[a-f0-9-]{36}$/.test(replayId)) {
@@ -820,6 +845,14 @@ export default function AirChess() {
     `${room?.code ?? "practice"}:${state.game}:${state.moves.length}:${selected}:${orientation}:${modal}:${Boolean(promotion)}:${canMove}:${arranging}:${isReviewing}`,
     aimMode,
     twoHandPause,
+    useMemo(
+      () => ({
+        delegateMode: trackingDelegate,
+        resolution: trackingResolution,
+        hoverMs: hoverSpeed === "fast" ? 700 : 1100,
+      }),
+      [trackingDelegate, trackingResolution, hoverSpeed],
+    ),
   );
 
   const cameraActive = handStatus === "tracking" || handStatus === "searching";
@@ -1285,6 +1318,12 @@ export default function AirChess() {
         onToggleEval={toggleShowEval}
         twoHandPause={twoHandPause}
         onToggleTwoHandPause={toggleTwoHandPause}
+        trackingDelegate={trackingDelegate}
+        onChangeTrackingDelegate={changeTrackingDelegate}
+        trackingResolution={trackingResolution}
+        onChangeTrackingResolution={changeTrackingResolution}
+        hoverSpeed={hoverSpeed}
+        onChangeHoverSpeed={changeHoverSpeed}
         focusMode={focusMode}
         onToggleFocusMode={() => changeFocusMode(!focusMode)}
         onNotice={setNotice}
