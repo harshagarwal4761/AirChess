@@ -1,6 +1,6 @@
 "use client";
 import type { Color } from "chess.js";
-import { ArrowUpRight, ChevronRight, Maximize2, ScanLine, Volume2, VolumeX, X } from "lucide-react";
+import { Activity, ArrowUpRight, ChevronRight, Maximize2, ScanLine, Volume2, VolumeX, X } from "lucide-react";
 import { pieceNames, type Action } from "../lib/game";
 import type { BoardTheme } from "../lib/preferences";
 import { resetPanelLayout } from "../lib/panel-layout";
@@ -27,10 +27,15 @@ type Props = {
   reachAssist: boolean;
   onToggleReachAssist: () => void;
   inRoom: boolean;
+  isAiMode: boolean;
   followTurn: boolean;
   onToggleFollowTurn: () => void;
   muted: boolean;
   onToggleMuted: () => void;
+  showEval: boolean;
+  onToggleEval: () => void;
+  twoHandPause: boolean;
+  onToggleTwoHandPause: () => void;
   focusMode: boolean;
   onToggleFocusMode: () => void;
   onNotice: (message: string) => void;
@@ -63,10 +68,15 @@ export function GameModals({
   reachAssist,
   onToggleReachAssist,
   inRoom,
+  isAiMode,
   followTurn,
   onToggleFollowTurn,
   muted,
   onToggleMuted,
+  showEval,
+  onToggleEval,
+  twoHandPause,
+  onToggleTwoHandPause,
   focusMode,
   onToggleFocusMode,
   onNotice,
@@ -302,6 +312,13 @@ export function GameModals({
               {muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
               Move sounds: {muted ? "off" : "on"}
             </button>
+            <button type="button" className="button secondary full setting-button" data-air onClick={onToggleEval}>
+              <Activity size={17} />
+              Evaluation bar: {showEval ? "on" : "off"}
+            </button>
+            <button type="button" className="button secondary full setting-button" data-air onClick={onToggleTwoHandPause}>
+              Two-hand palm pause: {twoHandPause ? "on · slower" : "off · faster FPS"}
+            </button>
             <button
               type="button"
               className="button secondary full setting-button"
@@ -346,10 +363,14 @@ export function GameModals({
             </h2>
             <p>
               {modal === "resign"
-                ? "Your friend will win by resignation. You can both request a rematch afterward."
+                ? inRoom
+                  ? "Your friend will win by resignation. You can both request a rematch afterward."
+                  : isAiMode
+                    ? "Stockfish will win this game by resignation. You can review the moves or start a new game."
+                    : "End this game by resignation."
                 : modal === "leave"
                   ? "An active game will remain in the room. Keep the room code if you want to rejoin in this tab."
-                  : "This clears your practice game. Export your moves first if you want to keep them."}
+                  : "This clears your local game. Export your moves first if you want to keep them."}
             </p>
             <div className="button-row">
               <button type="button" className="button secondary" data-air onClick={onClose}>

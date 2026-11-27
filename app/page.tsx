@@ -7,6 +7,7 @@ import { ChessBoard } from "../components/chess-board";
 import { GameModals, type ModalKind } from "../components/game-modals";
 import { SidebarPanels } from "../components/sidebar-panels";
 import { useHandTracking, type AirEvent } from "../hooks/use-hand-tracking";
+import { useStockfish } from "../hooks/use-stockfish";
 import { practiceOrientation } from "../lib/air-controls";
 import type { AimMode } from "../lib/air-pointer";
 import { applyAction, newGame, replay, undoLocalMove, type Action, type RoomState } from "../lib/game";
@@ -18,8 +19,10 @@ import {
   safeSet,
   writePracticeState,
   type BoardTheme,
+  type PlayMode,
 } from "../lib/preferences";
 import { playChessSound, type SoundKind } from "../lib/sound";
+import { DIFFICULTY_PRESETS, type DifficultyPreset } from "../lib/stockfish";
 
 type Room = {
   code: string;
@@ -71,6 +74,12 @@ export default function AirChess() {
   const [reachAssist, setReachAssist] = useState(defaultPreferences.reachAssist);
   const [aimMode, setAimMode] = useState<AimMode>(defaultPreferences.aimMode);
   const [boardTheme, setBoardTheme] = useState<BoardTheme>(defaultPreferences.boardTheme);
+  const [playMode, setPlayMode] = useState<PlayMode>(defaultPreferences.playMode);
+  const [aiDifficulty, setAiDifficulty] = useState<DifficultyPreset>(defaultPreferences.aiDifficulty);
+  const [aiColor, setAiColor] = useState<Color>(defaultPreferences.aiColor);
+  const [showEval, setShowEval] = useState(defaultPreferences.showEval);
+  const [twoHandPause, setTwoHandPause] = useState(defaultPreferences.twoHandPause);
+  const [hintVisible, setHintVisible] = useState(false);
   const [flipped, setFlipped] = useState(false);
   const [focusMode, setFocusMode] = useState(defaultPreferences.focusMode);
   const [arranging, setArranging] = useState(false);
@@ -91,13 +100,30 @@ export default function AirChess() {
   const state = room?.state ?? local;
   const activePly = viewPly === null ? state.moves.length : Math.max(0, Math.min(state.moves.length, viewPly));
   const isReviewing = activePly < state.moves.length;
+  const analysisAllowed = !room || Boolean(state.result);
 
   const liveChess = useMemo(() => replay(state.moves), [state.moves]);
   const displayChess = useMemo(
     () => (isReviewing ? replay(state.moves, activePly) : liveChess),
     [isReviewing, state.moves, activePly, liveChess],
   );
-  const orientation = room?.color ?? practiceOrientation(liveChess.turn(), followTurn, flipped);
+  const orientation =
+    room?.color ??
+    (playMode === "ai"
+      ? aiColor
+      : practiceOrientation(liveChess.turn(), followTurn, flipped));
+
+  const engineEnabled = hydrated && ((!room && playMode === "ai") || (analysisAllowed && (showEval || hintVisible)));
+  const {
+    thinking: aiThinking,
+    error: aiError,
+    evalScore,
+    bestHint,
+    setBestHint,
+    cancelSearch,
+    requestMove,
+    evaluatePosition,
+  } = useStockfish(engineEnabled);
 
   function changeOpacity(value: number) {
     const clamped = Math.max(0, Math.min(1, Math.round(value * 100) / 100));
@@ -115,6 +141,34 @@ export default function AirChess() {
   function changeBoardTheme(value: BoardTheme) {
     setBoardTheme(value);
     safeSet("airchess.theme", value);
+  }
+  function changePlayMode(value: PlayMode) {
+    cancelSearch();
+    setPlayMode(value);
+    safeSet("airchess.playMode", value);
+    setSelected(null);
+  }
+  function changeAiDifficulty(value: DifficultyPreset) {
+    setAiDifficulty(value);
+    safeSet("airchess.aiDifficulty", value);
+  }
+  function changeAiColor(value: Color) {
+    cancelSearch();
+    setAiColor(value);
+    safeSet("airchess.aiColor", value);
+    setSelected(null);
+  }
+  function toggleShowEval() {
+    setShowEval((v) => {
+      safeSet("airchess.showEval", String(!v));
+      return !v;
+    });
+  }
+  function toggleTwoHandPause() {
+    setTwoHandPause((v) => {
+      safeSet("airchess.twoHandPause", String(!v));
+      return !v;
+    });
   }
   function toggleReachAssist() {
     setReachAssist((v) => {
@@ -139,7 +193,9 @@ export default function AirChess() {
     !state.result &&
     !busy &&
     !isReviewing &&
-    (!room || (room.ready && room.color === liveChess.turn()));
+    (room
+      ? room.ready && room.color === liveChess.turn()
+      : playMode !== "ai" || (liveChess.turn() === aiColor && !aiThinking));
 
   const legal = useMemo(
     () => (selected && !isReviewing ? liveChess.moves({ square: selected, verbose: true }) : []),
@@ -267,6 +323,11 @@ export default function AirChess() {
       setFollowTurn(prefs.followTurn);
       setMuted(prefs.muted);
       setBoardTheme(prefs.boardTheme);
+      setPlayMode(prefs.playMode);
+      setAiDifficulty(prefs.aiDifficulty);
+      setAiColor(prefs.aiColor);
+      setShowEval(prefs.showEval);
+      setTwoHandPause(prefs.twoHandPause);
       setLocal(savedPractice);
       practiceLoadedRef.current = true;
       if (invite && /^\d{6}$/.test(invite) && invite !== savedRoom) {
@@ -340,8 +401,47 @@ export default function AirChess() {
       setSelected(null);
       setPromotion(null);
       setViewPly(null);
+      setHintVisible(false);
+      setBestHint(null);
     });
-  }, [room?.code, state.moves.length, state.game]);
+  }, [room?.code, state.moves.length, state.game, setBestHint]);
+
+  useEffect(() => {
+    if (!hydrated || room || playMode !== "ai" || state.result || isReviewing) return;
+    if (liveChess.turn() === aiColor) return;
+    const fen = liveChess.fen();
+    const turn = liveChess.turn();
+    const timer = setTimeout(() => {
+      requestMove(fen, turn, aiDifficulty, (aiMove) => {
+        setLocal((prev) => {
+          const checkChess = replay(prev.moves);
+          if (checkChess.fen() !== fen || prev.result) return prev;
+          try {
+            const next = applyAction(prev, turn, { type: "move", ...aiMove });
+            playSound(soundKindFor(next.moves, Boolean(next.result)));
+            return next;
+          } catch {
+            return prev;
+          }
+        });
+      });
+    }, 180);
+    return () => {
+      clearTimeout(timer);
+      cancelSearch();
+    };
+  }, [hydrated, room, playMode, state.result, isReviewing, liveChess, aiColor, aiDifficulty, requestMove, cancelSearch, playSound]);
+
+  useEffect(() => {
+    if (!hydrated || !analysisAllowed || (!showEval && !hintVisible)) return;
+    if (!room && playMode === "ai" && !state.result && liveChess.turn() !== aiColor && !isReviewing) return;
+    const fen = displayChess.fen();
+    const turn = displayChess.turn();
+    const timer = setTimeout(() => {
+      evaluatePosition(fen, turn);
+    }, 140);
+    return () => clearTimeout(timer);
+  }, [hydrated, analysisAllowed, showEval, hintVisible, room, playMode, state.result, liveChess, aiColor, isReviewing, displayChess, evaluatePosition]);
 
   async function connect(kind: "create" | "join") {
     if (busyRef.current) return;
@@ -382,7 +482,10 @@ export default function AirChess() {
           playSound(soundKindFor(next.state.moves, Boolean(next.state.result)));
         }
       } else {
-        const nextLocal = applyAction(local, liveChess.turn(), action);
+        const nextLocal =
+          action.type === "resign" && playMode === "ai"
+            ? applyAction(local, aiColor, action)
+            : applyAction(local, liveChess.turn(), action);
         setLocal(nextLocal);
         if (action.type === "move" || nextLocal.result) {
           playSound(soundKindFor(nextLocal.moves, Boolean(nextLocal.result)));
@@ -455,12 +558,14 @@ export default function AirChess() {
     fps: handFps,
     latency: handLatency,
     handCount,
+    delegate: handDelegate,
     feedback: handFeedback,
   } = useHandTracking(
     handleAir,
     reachAssist,
     `${room?.code ?? "practice"}:${state.game}:${state.moves.length}:${selected}:${orientation}:${modal}:${Boolean(promotion)}:${canMove}:${arranging}:${isReviewing}`,
     aimMode,
+    twoHandPause,
   );
 
   const cameraActive = handStatus === "tracking" || handStatus === "searching";
@@ -472,7 +577,11 @@ export default function AirChess() {
     state.result?.text ??
     (!room?.ready && room
       ? "Waiting for your friend"
-      : `${liveChess.turn() === "w" ? "White" : "Black"} to move${liveChess.isCheck() ? " · Check!" : ""}`);
+      : !room && playMode === "ai" && liveChess.turn() !== aiColor
+        ? aiThinking
+          ? "Stockfish is thinking…"
+          : "Stockfish to move"
+        : `${liveChess.turn() === "w" ? "White" : "Black"} to move${liveChess.isCheck() ? " · Check!" : ""}`);
 
   async function copyInvite() {
     try {
@@ -623,8 +732,14 @@ export default function AirChess() {
             </div>
             <div className="session-label">
               <span className={room ? "tiny-dot" : "hollow-dot"} />
-              {room ? `Room ${room.code}` : "Practice space"}
-              <small>{room ? connection : "Both colors · one controller"}</small>
+              {room ? `Room ${room.code}` : playMode === "ai" ? "vs Stockfish" : "Practice space"}
+              <small>
+                {room
+                  ? connection
+                  : playMode === "ai"
+                    ? `${DIFFICULTY_PRESETS[aiDifficulty].label} · You play ${aiColor === "w" ? "White" : "Black"}`
+                    : "Both colors · one controller"}
+              </small>
             </div>
           </div>
 
@@ -635,6 +750,14 @@ export default function AirChess() {
             legal={legal}
             lastMove={lastMove}
             room={room}
+            state={state}
+            busy={busy}
+            aiConfig={{
+              active: playMode === "ai",
+              playerColor: aiColor,
+              difficulty: aiDifficulty,
+              thinking: aiThinking,
+            }}
             arranging={arranging}
             modalOpen={Boolean(modal)}
             promotionOpen={Boolean(promotion)}
@@ -646,6 +769,9 @@ export default function AirChess() {
             airTarget={handFeedback.target}
             airLocked={handFeedback.locked}
             hasResult={Boolean(state.result)}
+            showEval={analysisAllowed && showEval}
+            evalScore={evalScore}
+            hintMove={analysisAllowed && hintVisible && !isReviewing ? bestHint : null}
             onSquareClick={handleBoardSquareClick}
             onFlip={() => {
               setFollowTurn(false);
@@ -654,11 +780,18 @@ export default function AirChess() {
             }}
             onDownloadPgn={downloadPgn}
             onUndo={() => {
-              setLocal((prev) => undoLocalMove(prev));
+              cancelSearch();
+              setLocal((prev) => {
+                const steps =
+                  playMode === "ai" && liveChess.turn() === aiColor && prev.moves.length >= 2 ? 2 : 1;
+                return undoLocalMove(prev, steps);
+              });
               setSelected(null);
               setViewPly(null);
             }}
             onJumpLive={() => setViewPly(null)}
+            onOpenModal={(nextModal) => setModal(nextModal)}
+            onAction={(action) => void act(action)}
           />
 
           <div className="stage-footer">
@@ -678,6 +811,7 @@ export default function AirChess() {
             fps: handFps,
             latency: handLatency,
             handCount,
+            delegate: handDelegate,
             feedback: handFeedback,
             start: startHand,
             stop: stopHand,
@@ -687,6 +821,19 @@ export default function AirChess() {
           selected={selected}
           onClearSelection={() => setSelected(null)}
           room={room}
+          playMode={playMode}
+          onPlayModeChange={changePlayMode}
+          aiDifficulty={aiDifficulty}
+          onAiDifficultyChange={changeAiDifficulty}
+          aiColor={aiColor}
+          onAiColorChange={changeAiColor}
+          aiThinking={aiThinking}
+          aiError={aiError}
+          showEval={analysisAllowed && showEval}
+          onToggleEval={toggleShowEval}
+          analysisAllowed={analysisAllowed}
+          hintVisible={analysisAllowed && hintVisible}
+          onToggleHint={() => setHintVisible((v) => !v)}
           state={state}
           history={fullHistory}
           viewPly={activePly}
@@ -701,7 +848,6 @@ export default function AirChess() {
           onCopyInvite={() => void copyInvite()}
           onOpenModal={(nextModal) => setModal(nextModal)}
           onDownloadPgn={downloadPgn}
-          onAction={(action) => void act(action)}
         />
       </div>
 
@@ -811,10 +957,15 @@ export default function AirChess() {
         reachAssist={reachAssist}
         onToggleReachAssist={toggleReachAssist}
         inRoom={Boolean(room)}
+        isAiMode={playMode === "ai"}
         followTurn={followTurn}
         onToggleFollowTurn={toggleFollowTurn}
         muted={muted}
         onToggleMuted={toggleMuted}
+        showEval={showEval}
+        onToggleEval={toggleShowEval}
+        twoHandPause={twoHandPause}
+        onToggleTwoHandPause={toggleTwoHandPause}
         focusMode={focusMode}
         onToggleFocusMode={() => changeFocusMode(!focusMode)}
         onNotice={setNotice}

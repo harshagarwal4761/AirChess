@@ -115,8 +115,8 @@ Phase 8 checks: 36 unit tests, TypeScript validation, production build, and 12 b
 - [x] Replace Unicode piece glyphs with custom SVG Staunton pieces, add board themes (`emerald`, `slate`, `walnut`), interactive move-history scrubbing, material balance, local undo, persisted settings/practice state, and distinct move/capture/check sounds.
 
 ## Phase 12 — Stockfish WASM AI opponent and analysis
-- [ ] Run Stockfish WASM in a Web Worker with difficulty presets so solo visitors can play against the computer with gestures or mouse.
-- [ ] Add an optional live evaluation bar and post-game best-move hints.
+- [x] Run Stockfish WASM in a Web Worker with difficulty presets so solo visitors can play against the computer with gestures or mouse.
+- [x] Add an optional live evaluation bar and post-game best-move hints.
 
 ## Phase 13 — real-time multiplayer (Durable Objects) and clocks
 - [ ] Replace HTTP polling with Cloudflare Durable Objects WebSockets with reconnect fallback and live presence.

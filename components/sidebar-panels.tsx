@@ -1,7 +1,10 @@
 "use client";
+import { useState } from "react";
 import type { Color, Move } from "chess.js";
 import {
+  Activity,
   ArrowUpRight,
+  Bot,
   Camera,
   CameraOff,
   Check,
@@ -11,16 +14,17 @@ import {
   ChevronRight,
   Copy,
   Download,
-  Flag,
   Hand,
+  Lightbulb,
   Link2,
-  RotateCcw,
   Users,
   Volume2,
   VolumeX,
 } from "lucide-react";
 import type { AimMode } from "../lib/air-pointer";
-import type { Action, RoomState } from "../lib/game";
+import type { RoomState } from "../lib/game";
+import type { PlayMode } from "../lib/preferences";
+import { DIFFICULTY_PRESETS, type DifficultyPreset } from "../lib/stockfish";
 import { MovableSurface } from "./movable-surface";
 
 type HandSummary = {
@@ -29,6 +33,7 @@ type HandSummary = {
   fps: number;
   latency: number;
   handCount: number;
+  delegate: "" | "GPU" | "CPU";
   feedback: {
     controllerReady: boolean;
     helper: boolean;
@@ -55,6 +60,19 @@ type Props = {
   selected: string | null;
   onClearSelection: () => void;
   room: RoomSummary;
+  playMode: PlayMode;
+  onPlayModeChange: (mode: PlayMode) => void;
+  aiDifficulty: DifficultyPreset;
+  onAiDifficultyChange: (difficulty: DifficultyPreset) => void;
+  aiColor: Color;
+  onAiColorChange: (color: Color) => void;
+  aiThinking: boolean;
+  aiError: string;
+  showEval: boolean;
+  onToggleEval: () => void;
+  analysisAllowed: boolean;
+  hintVisible: boolean;
+  onToggleHint: () => void;
   state: RoomState;
   history: Move[];
   viewPly: number;
@@ -69,8 +87,9 @@ type Props = {
   onCopyInvite: () => void;
   onOpenModal: (modal: "leave" | "resign" | "reset") => void;
   onDownloadPgn: () => void;
-  onAction: (action: Action) => void;
 };
+
+const difficulties: DifficultyPreset[] = ["casual", "club", "master"];
 
 export function SidebarPanels({
   arranging,
@@ -81,6 +100,19 @@ export function SidebarPanels({
   selected,
   onClearSelection,
   room,
+  playMode,
+  onPlayModeChange,
+  aiDifficulty,
+  onAiDifficultyChange,
+  aiColor,
+  onAiColorChange,
+  aiThinking,
+  aiError,
+  showEval,
+  onToggleEval,
+  analysisAllowed,
+  hintVisible,
+  onToggleHint,
   state,
   history,
   viewPly,
@@ -95,10 +127,11 @@ export function SidebarPanels({
   onCopyInvite,
   onOpenModal,
   onDownloadPgn,
-  onAction,
 }: Props) {
+  const [onlineTab, setOnlineTab] = useState(false);
   const totalPlies = history.length;
   const moveRows = Math.ceil(totalPlies / 2);
+  const activeTab: "ai" | "practice" | "online" = room ? "online" : onlineTab ? "online" : playMode;
 
   return (
     <aside className="sidebar">
@@ -110,14 +143,14 @@ export function SidebarPanels({
             {hand.status === "loading"
               ? "Starting"
               : cameraActive
-                ? "Live"
+                ? `Live${hand.delegate ? ` · ${hand.delegate}` : ""}`
                 : "Camera off"}
           </span>
         </div>
         <div className="camera-illustration">
           <div className="scan-corner a" />
           <div className="scan-corner b" />
-          <Hand size={52} strokeWidth={1} />
+          <Hand size={44} strokeWidth={1.1} />
           <span className="scan-orbit" />
           {cameraActive && <span className="fps">{hand.fps} FPS</span>}
         </div>
@@ -134,12 +167,12 @@ export function SidebarPanels({
           {hand.status === "tracking"
             ? hand.feedback.controllerReady
               ? aimMode === "hover"
-                ? "Point and hold for 1.1 seconds to select. Repeat on a highlighted destination."
+                ? "Point and hold for 1.1s to select, then hold on a highlighted square."
                 : "Pinch twice to select. Aim at a destination and pinch twice again."
-              : "Show only the hand you want to use, with your palm open for a moment."
+              : "Show only the hand you want to use, open for a moment."
             : cameraActive
-              ? "Start with just one open hand. Add your other hand after the controller is set."
-              : "Turn on your camera and bring the board to life with your hands."}
+              ? "Start with one open hand. Add your other hand after calibration."
+              : "Turn on your webcam to move pieces with hand gestures."}
         </p>
         <button
           type="button"
@@ -183,7 +216,8 @@ export function SidebarPanels({
               <span style={{ width: `${hand.feedback.progress * 100}%` }} />
             </div>
             <span>
-              {hand.fps} FPS · {hand.latency} ms · {hand.handCount} hand{hand.handCount === 1 ? "" : "s"} detected
+              {hand.fps} FPS · {hand.latency} ms · {hand.handCount} hand{hand.handCount === 1 ? "" : "s"}
+              {hand.delegate ? ` · ${hand.delegate}` : ""}
               {aimMode === "double-pinch" ? ` · Pinch ${hand.feedback.pinched ? "closed" : "open"}` : ""}
             </span>
             <span>
@@ -203,16 +237,49 @@ export function SidebarPanels({
             {hand.error}
           </div>
         )}
-        <div className="camera-note">
-          {cameraActive ? "Hold over a button for 1.3s to activate it." : "Mouse & keyboard work here, too."}
-        </div>
       </MovableSurface>
 
-      <MovableSurface className="panel room-panel" panelId="room" title="Friendly match" enabled={arranging}>
+      <MovableSurface className="panel mode-panel" panelId="room" title="Game mode" enabled={arranging}>
         <div className="panel-top">
-          <span className="eyebrow">BETTER WITH A FRIEND</span>
-          <Users size={17} />
+          <span className="eyebrow">GAME MODE</span>
+          {activeTab === "ai" ? <Bot size={16} /> : <Users size={16} />}
         </div>
+
+        {!room && (
+          <div className="aim-modes mode-tabs" role="group" aria-label="Game mode">
+            <button
+              type="button"
+              data-air
+              aria-pressed={activeTab === "practice"}
+              onClick={() => {
+                setOnlineTab(false);
+                onPlayModeChange("practice");
+              }}
+            >
+              Pass &amp; play
+            </button>
+            <button
+              type="button"
+              data-air
+              aria-pressed={activeTab === "ai"}
+              onClick={() => {
+                setOnlineTab(false);
+                onPlayModeChange("ai");
+              }}
+            >
+              vs Stockfish
+            </button>
+            <button
+              type="button"
+              data-air
+              aria-pressed={activeTab === "online"}
+              onClick={() => setOnlineTab(true)}
+            >
+              Online
+            </button>
+          </div>
+        )}
+
         {room ? (
           <>
             <h2>{room.ready ? "Two players. One board." : "Your friend has a seat."}</h2>
@@ -231,13 +298,56 @@ export function SidebarPanels({
               </button>
             </div>
           </>
-        ) : (
-          <>
-            <h2>Make it a friendly match.</h2>
-            <p>
-              Separate laptops. Shared board.
-              <br />A little friendly competition.
+        ) : activeTab === "ai" ? (
+          <div className="ai-options">
+            <div className="ai-row" role="group" aria-label="Stockfish difficulty">
+              {difficulties.map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  data-air
+                  className={`mini-chip ${aiDifficulty === level ? "active" : ""}`}
+                  aria-pressed={aiDifficulty === level}
+                  onClick={() => onAiDifficultyChange(level)}
+                >
+                  {DIFFICULTY_PRESETS[level].label}
+                </button>
+              ))}
+            </div>
+            <div className="ai-row" role="group" aria-label="Play as color">
+              <button
+                type="button"
+                data-air
+                className={`mini-chip ${aiColor === "w" ? "active" : ""}`}
+                aria-pressed={aiColor === "w"}
+                onClick={() => onAiColorChange("w")}
+              >
+                Play White
+              </button>
+              <button
+                type="button"
+                data-air
+                className={`mini-chip ${aiColor === "b" ? "active" : ""}`}
+                aria-pressed={aiColor === "b"}
+                onClick={() => onAiColorChange("b")}
+              >
+                Play Black
+              </button>
+            </div>
+            <p className="ai-note">
+              {aiThinking
+                ? "Stockfish is calculating…"
+                : `${DIFFICULTY_PRESETS[aiDifficulty].subtitle} · local WASM engine.`}
             </p>
+            {aiError && (
+              <div className="inline-error" role="alert">
+                {aiError}
+              </div>
+            )}
+          </div>
+        ) : activeTab === "online" ? (
+          <div className="online-setup">
+            <p>Play a friend on a separate laptop with a 6-digit room code.</p>
             <div className="button-row">
               <button
                 type="button"
@@ -254,13 +364,17 @@ export function SidebarPanels({
                 <ChevronRight size={15} />
               </button>
             </div>
-          </>
+          </div>
+        ) : (
+          <p className="ai-note">
+            Play both sides locally on one board, or switch to vs Stockfish or Online above.
+          </p>
         )}
       </MovableSurface>
 
       <MovableSurface className="panel moves-panel" panelId="history" title="Move history" enabled={arranging}>
         <div className="panel-top">
-          <span className="eyebrow">THE GAME SO FAR</span>
+          <span className="eyebrow">MOVES &amp; ANALYSIS</span>
           <div className="history-tools">
             {totalPlies > 0 && (
               <div className="scrub-controls" role="group" aria-label="Review moves">
@@ -304,13 +418,48 @@ export function SidebarPanels({
             )}
             <button
               type="button"
+              className={`icon-button ${showEval ? "tool-active" : ""}`}
+              data-air
+              aria-pressed={showEval}
+              aria-label="Toggle evaluation bar"
+              title={analysisAllowed ? "Toggle Stockfish evaluation bar" : "Evaluation paused during live online match"}
+              disabled={!analysisAllowed}
+              onClick={onToggleEval}
+            >
+              <Activity size={14} />
+            </button>
+            <button
+              type="button"
+              className={`icon-button ${hintVisible ? "tool-active" : ""}`}
+              data-air
+              aria-pressed={hintVisible}
+              aria-label="Show best move hint"
+              title={analysisAllowed ? "Show Stockfish best move hint" : "Hints disabled during live online match"}
+              disabled={!analysisAllowed || Boolean(state.result)}
+              onClick={onToggleHint}
+            >
+              <Lightbulb size={14} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              data-air
+              aria-label={muted ? "Enable move sounds" : "Mute move sounds"}
+              title={muted ? "Enable move sounds" : "Mute move sounds"}
+              onClick={onToggleMuted}
+            >
+              {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+            </button>
+            <button
+              type="button"
               className="icon-button"
               data-air
               aria-label="Download PGN"
+              title="Download PGN"
               disabled={!totalPlies}
               onClick={onDownloadPgn}
             >
-              <Download size={15} />
+              <Download size={14} />
             </button>
           </div>
         </div>
@@ -362,62 +511,6 @@ export function SidebarPanels({
               </div>
             )}
           </div>
-        </div>
-        <div className="game-actions">
-          {room ? (
-            state.result ? (
-              <button
-                type="button"
-                className="text-button"
-                data-air
-                disabled={busy || state.rematch === room.color}
-                onClick={() => onAction({ type: "rematch" })}
-              >
-                <RotateCcw size={14} />
-                {state.rematch === room.color
-                  ? "Rematch requested"
-                  : state.rematch
-                    ? "Accept rematch"
-                    : "Play again"}
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="text-button"
-                  data-air
-                  disabled={!room.ready || busy}
-                  onClick={() => onOpenModal("resign")}
-                >
-                  <Flag size={14} />
-                  Resign
-                </button>
-                <button
-                  type="button"
-                  className="text-button"
-                  data-air
-                  disabled={!room.ready || busy || state.drawOffer === room.color}
-                  onClick={() => onAction({ type: "offer-draw" })}
-                >
-                  {state.drawOffer === room.color ? "Draw offered" : "Offer draw"}
-                </button>
-              </>
-            )
-          ) : (
-            <button type="button" className="text-button" data-air onClick={() => onOpenModal("reset")}>
-              <RotateCcw size={14} />
-              New practice game
-            </button>
-          )}
-          <button
-            type="button"
-            className="icon-button"
-            data-air
-            aria-label={muted ? "Enable move sounds" : "Mute move sounds"}
-            onClick={onToggleMuted}
-          >
-            {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-          </button>
         </div>
       </MovableSurface>
     </aside>

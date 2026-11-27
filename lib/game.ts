@@ -16,11 +16,11 @@ export function replay(moves: string[], ply = moves.length) {
   for (let i = 0; i < limit; i++) chess.move(moves[i]);
   return chess;
 }
-export function undoLocalMove(state: RoomState): RoomState {
-  if (!state.moves.length) return state;
+export function undoLocalMove(state: RoomState, steps = 1): RoomState {
+  if (!state.moves.length || steps < 1) return state;
   return {
     ...state,
-    moves: state.moves.slice(0, -1),
+    moves: state.moves.slice(0, Math.max(0, state.moves.length - steps)),
     result: null,
     drawOffer: null,
     rematch: null,

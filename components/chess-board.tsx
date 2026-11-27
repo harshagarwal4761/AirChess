@@ -1,8 +1,16 @@
 "use client";
 import { useMemo } from "react";
 import type { Chess, Color, Move, Square } from "chess.js";
-import { Download, RotateCcw, Undo2 } from "lucide-react";
-import { materialSummary, pieceNames } from "../lib/game";
+import { Download, Flag, Handshake, RotateCcw, Undo2 } from "lucide-react";
+import { materialSummary, pieceNames, type Action, type RoomState } from "../lib/game";
+import {
+  DIFFICULTY_PRESETS,
+  evalWinPercent,
+  formatEval,
+  type DifficultyPreset,
+  type EvalScore,
+  type ParsedMove,
+} from "../lib/stockfish";
 import { ChessPiece } from "./chess-pieces";
 import { MovableSurface } from "./movable-surface";
 
@@ -14,6 +22,13 @@ type RoomSummary = {
   ready: boolean;
 } | null;
 
+type AiConfig = {
+  active: boolean;
+  playerColor: Color;
+  difficulty: DifficultyPreset;
+  thinking: boolean;
+};
+
 type Props = {
   chess: Chess;
   orientation: Color;
@@ -21,6 +36,9 @@ type Props = {
   legal: Move[];
   lastMove?: Move;
   room: RoomSummary;
+  state: RoomState;
+  busy: boolean;
+  aiConfig: AiConfig;
   arranging: boolean;
   modalOpen: boolean;
   promotionOpen: boolean;
@@ -32,11 +50,16 @@ type Props = {
   airTarget: string | null;
   airLocked: boolean;
   hasResult: boolean;
+  showEval: boolean;
+  evalScore: EvalScore | null;
+  hintMove: ParsedMove | null;
   onSquareClick: (square: Square) => void;
   onFlip: () => void;
   onDownloadPgn: () => void;
   onUndo: () => void;
   onJumpLive: () => void;
+  onOpenModal: (modal: "resign" | "reset") => void;
+  onAction: (action: Action) => void;
 };
 
 export function ChessBoard({
@@ -46,6 +69,9 @@ export function ChessBoard({
   legal,
   lastMove,
   room,
+  state,
+  busy,
+  aiConfig,
   arranging,
   modalOpen,
   promotionOpen,
@@ -57,11 +83,16 @@ export function ChessBoard({
   airTarget,
   airLocked,
   hasResult,
+  showEval,
+  evalScore,
+  hintMove,
   onSquareClick,
   onFlip,
   onDownloadPgn,
   onUndo,
   onJumpLive,
+  onOpenModal,
+  onAction,
 }: Props) {
   const material = useMemo(() => materialSummary(chess), [chess]);
   const squares = useMemo(
@@ -81,6 +112,7 @@ export function ChessBoard({
       squares.map((square, i) => {
         const piece = chess.get(square);
         const isLegal = !isReviewing && legal.some((m) => m.to === square);
+        const isHint = Boolean(hintMove && (hintMove.from === square || hintMove.to === square));
         const check =
           piece?.type === "k" &&
           piece.color === chess.turn() &&
@@ -95,7 +127,7 @@ export function ChessBoard({
                 ? square
                 : undefined
             }
-            className={`square ${(Math.floor(i / 8) + (i % 8)) % 2 ? "dark" : "light"} ${selected === square ? "selected" : ""} ${lastMove?.from === square || lastMove?.to === square ? "last-move" : ""} ${check ? "in-check" : ""} ${airTarget === square ? "air-target" : ""} ${airTarget === square && airLocked ? "air-locked" : ""}`}
+            className={`square ${(Math.floor(i / 8) + (i % 8)) % 2 ? "dark" : "light"} ${selected === square ? "selected" : ""} ${lastMove?.from === square || lastMove?.to === square ? "last-move" : ""} ${isHint ? "hint-square" : ""} ${check ? "in-check" : ""} ${airTarget === square ? "air-target" : ""} ${airTarget === square && airLocked ? "air-locked" : ""}`}
             aria-label={`${square}${piece ? ` ${piece.color === "w" ? "white" : "black"} ${pieceNames[piece.type]}` : " empty"}${isLegal ? ", legal destination" : ""}`}
             aria-pressed={selected === square}
             onClick={() => onSquareClick(square)}
@@ -109,11 +141,13 @@ export function ChessBoard({
           </button>
         );
       }),
-    [squares, chess, isReviewing, legal, interactive, selected, lastMove, airTarget, airLocked, onSquareClick],
+    [squares, chess, isReviewing, legal, hintMove, interactive, selected, lastMove, airTarget, airLocked, onSquareClick],
   );
 
   function playerBar(color: Color) {
     const you = room?.color === color;
+    const isAiOpponent = !room && aiConfig.active && aiConfig.playerColor !== color;
+    const isHumanVsAi = !room && aiConfig.active && aiConfig.playerColor === color;
     const capturedList = color === "w" ? material.whiteCaptured : material.blackCaptured;
     const advantage = color === "w" ? material.whiteAdvantage : material.blackAdvantage;
     return (
@@ -131,7 +165,11 @@ export function ChessBoard({
                 : room.ready
                   ? "Your friend"
                   : "An open seat"
-              : "You control both colors"}
+              : isAiOpponent
+                ? `Stockfish · ${DIFFICULTY_PRESETS[aiConfig.difficulty].label}`
+                : isHumanVsAi
+                  ? "You"
+                  : "You control both colors"}
           </strong>
           <span className="player-meta">
             <span>{color === "w" ? "White pieces" : "Black pieces"}</span>
@@ -155,22 +193,46 @@ export function ChessBoard({
             ? "Finished"
             : !room?.ready && room
               ? "Waiting"
-              : chess.turn() === color
-                ? "To move"
-                : "Untimed"}
+              : isAiOpponent && aiConfig.thinking
+                ? "Thinking…"
+                : chess.turn() === color
+                  ? "To move"
+                  : "Untimed"}
         </span>
       </div>
     );
   }
 
+  const whitePct = evalWinPercent(evalScore);
+  const evalLabel = formatEval(evalScore);
+  const whiteAhead = evalScore ? (evalScore.type === "mate" ? evalScore.value >= 0 : evalScore.value >= 0) : true;
+
   return (
     <MovableSurface as="div" className="board-region" panelId="board" title="Chessboard" enabled={arranging}>
       {playerBar(orientation === "w" ? "b" : "w")}
-      <div className={`board-shell ${isReviewing ? "reviewing-board" : ""}`}>
-        <div className="board-corner corner-tl" />
-        <div className="board-corner corner-br" />
-        <div className="board" role="group" aria-label="Chessboard">
-          {boardSquares}
+      <div className={`board-stage ${showEval ? "with-eval" : ""}`}>
+        {showEval && (
+          <div
+            className={`eval-bar ${orientation === "b" ? "flipped" : ""}`}
+            role="meter"
+            aria-label={`Position evaluation ${evalLabel}`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(whitePct)}
+            title={`Stockfish evaluation: ${evalLabel}`}
+          >
+            <div className="eval-fill" style={{ height: `${whitePct}%` }} />
+            <span className={`eval-readout ${whiteAhead ? "white-adv" : "black-adv"}`}>
+              {evalLabel}
+            </span>
+          </div>
+        )}
+        <div className={`board-shell ${isReviewing ? "reviewing-board" : ""}`}>
+          <div className="board-corner corner-tl" />
+          <div className="board-corner corner-br" />
+          <div className="board" role="group" aria-label="Chessboard">
+            {boardSquares}
+          </div>
         </div>
       </div>
       {playerBar(orientation)}
@@ -188,30 +250,106 @@ export function ChessBoard({
         ) : (
           <span role="status">{statusText}</span>
         )}
-        <div className="caption-actions">
-          {!room && totalPlies > 0 && (
+      </div>
+      <div className="board-actions" role="toolbar" aria-label="Game actions">
+        {room ? (
+          hasResult ? (
             <button
               type="button"
-              className="icon-button"
+              className="action-pill primary-pill"
+              data-air
+              disabled={busy || state.rematch === room.color}
+              onClick={() => onAction({ type: "rematch" })}
+            >
+              <RotateCcw size={14} />
+              <span>
+                {state.rematch === room.color
+                  ? "Rematch sent"
+                  : state.rematch
+                    ? "Accept rematch"
+                    : "Play again"}
+              </span>
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="action-pill"
+                data-air
+                disabled={!room.ready || busy || state.drawOffer === room.color}
+                onClick={() => onAction({ type: "offer-draw" })}
+              >
+                <Handshake size={14} />
+                <span>{state.drawOffer === room.color ? "Draw offered" : "Offer draw"}</span>
+              </button>
+              <button
+                type="button"
+                className="action-pill danger-pill"
+                data-air
+                disabled={!room.ready || busy}
+                onClick={() => onOpenModal("resign")}
+              >
+                <Flag size={14} />
+                <span>Resign</span>
+              </button>
+            </>
+          )
+        ) : (
+          <>
+            <button
+              type="button"
+              className="action-pill"
               data-air
               aria-label="Undo last move"
-              title="Undo last move"
+              disabled={totalPlies === 0}
               onClick={onUndo}
             >
-              <Undo2 size={15} />
+              <Undo2 size={14} />
+              <span>Undo</span>
             </button>
-          )}
-          <button
-            type="button"
-            className="icon-button"
-            data-air
-            aria-label={room ? "Export game as PGN" : "Flip board"}
-            title={room ? "Export game as PGN" : "Flip board"}
-            onClick={room ? onDownloadPgn : onFlip}
-          >
-            {room ? <Download size={16} /> : <RotateCcw size={16} />}
-          </button>
-        </div>
+            {aiConfig.active && !hasResult && totalPlies > 0 && (
+              <button
+                type="button"
+                className="action-pill danger-pill"
+                data-air
+                onClick={() => onOpenModal("resign")}
+              >
+                <Flag size={14} />
+                <span>Resign</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="action-pill"
+              data-air
+              aria-label="Flip board"
+              onClick={onFlip}
+            >
+              <RotateCcw size={14} />
+              <span>Flip</span>
+            </button>
+            <button
+              type="button"
+              className="action-pill"
+              data-air
+              onClick={() => onOpenModal("reset")}
+            >
+              <RotateCcw size={14} />
+              <span>New game</span>
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          className="action-pill"
+          data-air
+          aria-label="Export game as PGN"
+          disabled={totalPlies === 0}
+          onClick={onDownloadPgn}
+        >
+          <Download size={14} />
+          <span>PGN</span>
+        </button>
       </div>
     </MovableSurface>
   );

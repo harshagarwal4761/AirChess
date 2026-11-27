@@ -67,6 +67,7 @@ export function useHandTracking(
   reachAssist = false,
   interactionKey = "",
   mode: AimMode = "hover",
+  twoHandPause = false,
 ) {
   const videoRef = useRef<HTMLVideoElement>(null),
     canvasRef = useRef<HTMLCanvasElement>(null),
@@ -78,13 +79,10 @@ export function useHandTracking(
     [fps, setFps] = useState(0),
     [latency, setLatency] = useState(0),
     [handCount, setHandCount] = useState(0),
+    [delegate, setDelegate] = useState<"" | "GPU" | "CPU">(""),
     [feedback, setFeedback] = useState<Feedback>(idleFeedback);
   const callback = useRef(onEvent);
-  const options = useRef({ reachAssist, interactionKey, mode });
-  useEffect(() => {
-    callback.current = onEvent;
-    options.current = { reachAssist, interactionKey, mode };
-  }, [onEvent, reachAssist, interactionKey, mode]);
+  const options = useRef({ reachAssist, interactionKey, mode, twoHandPause });
   const resources = useRef<{
     worker?: Worker;
     stream?: MediaStream;
@@ -95,6 +93,16 @@ export function useHandTracking(
     recalibrate?: () => void;
     timeout?: ReturnType<typeof setTimeout>;
   }>({ generation: 0 });
+  useEffect(() => {
+    callback.current = onEvent;
+    options.current = { reachAssist, interactionKey, mode, twoHandPause };
+  }, [onEvent, reachAssist, interactionKey, mode, twoHandPause]);
+  useEffect(() => {
+    resources.current.worker?.postMessage({
+      type: "config",
+      numHands: twoHandPause ? 2 : 1,
+    });
+  }, [twoHandPause]);
   const stop = useCallback(() => {
     const r = resources.current;
     r.generation++;
@@ -123,6 +131,7 @@ export function useHandTracking(
     setFps(0);
     setLatency(0);
     setHandCount(0);
+    setDelegate("");
     setFeedback(idleFeedback);
   }, []);
   useEffect(() => () => stop(), [stop]);
@@ -146,9 +155,9 @@ export function useHandTracking(
         audio: false,
         video: {
           facingMode: "user",
-          frameRate: { ideal: 60, max: 60 },
-          width: { ideal: 960 },
-          height: { ideal: 540 },
+          frameRate: { ideal: 60, min: 24 },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
         },
       });
       if (r.generation !== generation) {
@@ -176,6 +185,7 @@ export function useHandTracking(
         lastPalm: Point | null = null;
       let lastKey = options.current.interactionKey + options.current.mode,
         lastSeen = 0,
+        lastTrack = 0,
         lastVideo = -1,
         inFlight = false,
         frameSentAt = 0,
@@ -186,11 +196,14 @@ export function useHandTracking(
       let dwell: HTMLElement | null = null,
         dwellSince = 0,
         fired: HTMLElement | null = null,
-        lastFeedback = "";
-      const publish = (value: Feedback) => {
+        lastFeedback = "",
+        lastFeedbackAt = 0;
+      const publish = (value: Feedback, force = false) => {
         const key = JSON.stringify(value);
-        if (key !== lastFeedback) {
+        const t = performance.now();
+        if (key !== lastFeedback && (force || t - lastFeedbackAt > 90 || value.progress === 0 || value.progress === 1)) {
           lastFeedback = key;
+          lastFeedbackAt = t;
           setFeedback(value);
         }
       };
@@ -251,6 +264,7 @@ export function useHandTracking(
         if (data.type === "ready") {
           clearTimeout(timeout);
           ready = true;
+          setDelegate(data.delegate === "CPU" ? "CPU" : "GPU");
           setStatus("searching");
           return;
         }
@@ -290,11 +304,9 @@ export function useHandTracking(
         const canvas = canvasRef.current!,
           ctx = canvas.getContext("2d")!;
         const vw = document.documentElement.clientWidth,
-          vh = innerHeight,
-          dpr = Math.min(window.devicePixelRatio || 1, 2);
-        if (canvas.width !== Math.round(vw * dpr)) canvas.width = Math.round(vw * dpr);
-        if (canvas.height !== Math.round(vh * dpr)) canvas.height = Math.round(vh * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          vh = innerHeight;
+        if (canvas.width !== vw) canvas.width = vw;
+        if (canvas.height !== vh) canvas.height = vh;
         ctx.clearRect(0, 0, vw, vh);
         const videoRect = video.getBoundingClientRect();
         const mapped = landmarks.map((hand) =>
@@ -337,9 +349,12 @@ export function useHandTracking(
           }
         }
         if (primary < 0) {
+          // Hold active hover state briefly across single-frame detection flickers.
+          if (lastTrack && now - lastTrack < 160) return;
           lose();
           return;
         }
+        lastTrack = now;
         const helperOpen = mapped.some(
           (points, i) => i !== primary && openPalm(points),
         );
@@ -383,17 +398,37 @@ export function useHandTracking(
         pointerState = followPointer(pointerState, raw, now);
         const pointer = pointerState!.point;
         const isHover = options.current.mode === "hover";
-        const element = document
-          .elementFromPoint(pointer.x, pointer.y)
-          ?.closest<HTMLElement>("[data-air-square]");
-        const target = element
+        const hit = document.elementFromPoint(pointer.x, pointer.y);
+        const element = hit?.closest<HTMLElement>("[data-air-square]") ?? null;
+        // Once aiming inside a square in hover mode, tolerate small 3px border grazes to prevent accidental resets.
+        let target = element
           ? centerTarget(
               element.dataset.airSquare!,
               element.getBoundingClientRect(),
               pointer,
-              isHover ? 0.015 : 0.06,
+              isHover ? 0.0 : 0.06,
             )
           : null;
+        if (isHover && !target && hover.target) {
+          const prevEl = document.querySelector<HTMLElement>(`[data-air-square="${hover.target.square}"]`);
+          if (prevEl) {
+            const r = prevEl.getBoundingClientRect();
+            const pad = 4;
+            if (
+              pointer.x >= r.left - pad &&
+              pointer.x <= r.right + pad &&
+              pointer.y >= r.top - pad &&
+              pointer.y <= r.bottom + pad
+            ) {
+              target = {
+                square: hover.target.square,
+                x: r.left + r.width / 2,
+                y: r.top + r.height / 2,
+                size: Math.min(r.width, r.height),
+              };
+            }
+          }
+        }
         let confirmed: string | null = null;
         let progress = 0;
         let cancelled = false;
@@ -447,10 +482,7 @@ export function useHandTracking(
           callback.current({ type: "confirm", square: confirmed });
           return;
         }
-        const button =
-          document
-            .elementFromPoint(pointer.x, pointer.y)
-            ?.closest<HTMLElement>("[data-air]") ?? null;
+        const button = hit?.closest<HTMLElement>("[data-air]") ?? null;
         if (
           (!isHover && (state.pinched || state.candidate || Boolean(sequence.locked))) ||
           !button ||
@@ -472,14 +504,29 @@ export function useHandTracking(
           button.click();
         }
       };
-      worker.postMessage({ type: "init", origin: location.origin });
+      worker.postMessage({
+        type: "init",
+        origin: location.origin,
+        numHands: options.current.twoHandPause ? 2 : 1,
+      });
       // Capture each fresh camera frame when the model is ready. Never build a queue.
       const capture = (now: number, mediaTime: number) => {
         if (!ready || inFlight || document.hidden || video.readyState < 2 || mediaTime === lastVideo) return;
         lastVideo = mediaTime;
         inFlight = true;
         frameSentAt = now;
-        createImageBitmap(video)
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        // Preserve sharp landmark crops; only downscale high-res >720p streams with medium quality.
+        const bitmapPromise =
+          vw > 720 && vh > 0
+            ? createImageBitmap(video, {
+                resizeWidth: 640,
+                resizeHeight: Math.max(1, Math.round((640 * vh) / vw)),
+                resizeQuality: "medium",
+              })
+            : createImageBitmap(video);
+        bitmapPromise
           .then((bitmap) => {
             if (r.generation !== generation) { bitmap.close(); return; }
             worker.postMessage({ type: "frame", bitmap, timestamp: now }, [bitmap]);
@@ -532,6 +579,7 @@ export function useHandTracking(
     fps,
     latency,
     handCount,
+    delegate,
     feedback,
   };
 }

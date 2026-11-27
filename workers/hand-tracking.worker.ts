@@ -12,20 +12,26 @@ self.onmessage = async (event: MessageEvent) => {
           modelAssetPath: `${data.origin}/models/hand_landmarker.task`,
         },
         runningMode: "VIDEO" as const,
-        numHands: 2,
-        minHandDetectionConfidence: 0.5,
-        minHandPresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
+        numHands: data.numHands === 2 ? 2 : 1,
+        minHandDetectionConfidence: 0.55,
+        minHandPresenceConfidence: 0.45,
+        minTrackingConfidence: 0.45,
       };
+      let delegate: "GPU" | "CPU" = "GPU";
       try {
         model = await HandLandmarker.createFromOptions(files, {
           ...options,
           baseOptions: { ...options.baseOptions, delegate: "GPU" },
         });
       } catch {
+        delegate = "CPU";
         model = await HandLandmarker.createFromOptions(files, options);
       }
-      self.postMessage({ type: "ready" });
+      self.postMessage({ type: "ready", delegate });
+    } else if (data.type === "config") {
+      if (model) {
+        await model.setOptions({ numHands: data.numHands === 2 ? 2 : 1 });
+      }
     } else if (data.type === "frame") {
       try {
         if (!model) throw new Error("Hand model is not ready.");

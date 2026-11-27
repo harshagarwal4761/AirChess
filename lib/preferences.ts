@@ -1,7 +1,10 @@
+import type { Color } from "chess.js";
 import type { AimMode } from "./air-pointer";
 import { newGame, replay, type RoomState } from "./game";
+import type { DifficultyPreset } from "./stockfish";
 
 export type BoardTheme = "emerald" | "slate" | "walnut";
+export type PlayMode = "practice" | "ai";
 
 export type Preferences = {
   opacity: number;
@@ -11,6 +14,11 @@ export type Preferences = {
   followTurn: boolean;
   muted: boolean;
   boardTheme: BoardTheme;
+  playMode: PlayMode;
+  aiDifficulty: DifficultyPreset;
+  aiColor: Color;
+  showEval: boolean;
+  twoHandPause: boolean;
 };
 
 export const defaultPreferences: Preferences = {
@@ -21,6 +29,11 @@ export const defaultPreferences: Preferences = {
   followTurn: true,
   muted: false,
   boardTheme: "emerald",
+  playMode: "practice",
+  aiDifficulty: "club",
+  aiColor: "w",
+  showEval: false,
+  twoHandPause: false,
 };
 
 const PRACTICE_KEY = "airchess.practice.v1";
@@ -48,6 +61,9 @@ export function readPreferences(): Preferences {
     : defaultPreferences.opacity;
   const aim = safeGet("airchess.aimMode");
   const theme = safeGet("airchess.theme");
+  const playMode = safeGet("airchess.playMode");
+  const diff = safeGet("airchess.aiDifficulty");
+  const aiColor = safeGet("airchess.aiColor");
   return {
     opacity: parsedOpacity,
     focusMode: safeGet("airchess.focus") === "true",
@@ -56,6 +72,11 @@ export function readPreferences(): Preferences {
     followTurn: safeGet("airchess.followTurn") !== "false",
     muted: safeGet("airchess.muted") === "true",
     boardTheme: theme === "slate" || theme === "walnut" ? theme : "emerald",
+    playMode: playMode === "ai" ? "ai" : "practice",
+    aiDifficulty: diff === "casual" || diff === "master" ? diff : "club",
+    aiColor: aiColor === "b" ? "b" : "w",
+    showEval: safeGet("airchess.showEval") === "true",
+    twoHandPause: safeGet("airchess.twoHandPause") === "true",
   };
 }
 
