@@ -2,7 +2,7 @@
 import { useMemo } from "react";
 import type { Chess, Color, Move, Square } from "chess.js";
 import { Download, Flag, Handshake, RotateCcw, Undo2 } from "lucide-react";
-import { materialSummary, pieceNames, type Action, type RoomState } from "../lib/game";
+import { formatClock, materialSummary, pieceNames, type Action, type RoomState } from "../lib/game";
 import {
   DIFFICULTY_PRESETS,
   evalWinPercent,
@@ -18,8 +18,9 @@ const files = "abcdefgh";
 
 type RoomSummary = {
   code: string;
-  color: Color;
+  color: Color | null;
   ready: boolean;
+  spectating?: boolean;
 } | null;
 
 type AiConfig = {
@@ -29,6 +30,11 @@ type AiConfig = {
   thinking: boolean;
 };
 
+type ClockView = {
+  wMs: number;
+  bMs: number;
+} | null;
+
 type Props = {
   chess: Chess;
   orientation: Color;
@@ -37,6 +43,7 @@ type Props = {
   lastMove?: Move;
   room: RoomSummary;
   state: RoomState;
+  clocks: ClockView;
   busy: boolean;
   aiConfig: AiConfig;
   arranging: boolean;
@@ -70,6 +77,7 @@ export function ChessBoard({
   lastMove,
   room,
   state,
+  clocks,
   busy,
   aiConfig,
   arranging,
@@ -150,6 +158,9 @@ export function ChessBoard({
     const isHumanVsAi = !room && aiConfig.active && aiConfig.playerColor === color;
     const capturedList = color === "w" ? material.whiteCaptured : material.blackCaptured;
     const advantage = color === "w" ? material.whiteAdvantage : material.blackAdvantage;
+    const ms = clocks ? (color === "w" ? clocks.wMs : clocks.bMs) : null;
+    const activeTurn = chess.turn() === color && !hasResult && (!room || room.ready);
+    const lowTime = ms !== null && ms > 0 && ms < 20_000;
     return (
       <div
         className={`player-bar ${chess.turn() === color && !hasResult ? "active-player" : ""}`}
@@ -160,11 +171,15 @@ export function ChessBoard({
         <div className="player-name">
           <strong>
             {room
-              ? you
-                ? "You"
-                : room.ready
-                  ? "Your friend"
-                  : "An open seat"
+              ? room.spectating
+                ? color === "w"
+                  ? "White player"
+                  : "Black player"
+                : you
+                  ? "You"
+                  : room.ready
+                    ? "Your friend"
+                    : "An open seat"
               : isAiOpponent
                 ? `Stockfish · ${DIFFICULTY_PRESETS[aiConfig.difficulty].label}`
                 : isHumanVsAi
@@ -188,17 +203,26 @@ export function ChessBoard({
             {advantage > 0 && <span className="material-chip">+{advantage}</span>}
           </span>
         </div>
-        <span className="turn-chip">
-          {hasResult
-            ? "Finished"
-            : !room?.ready && room
-              ? "Waiting"
-              : isAiOpponent && aiConfig.thinking
-                ? "Thinking…"
-                : chess.turn() === color
-                  ? "To move"
-                  : "Untimed"}
-        </span>
+        {ms !== null ? (
+          <span
+            className={`clock-chip ${activeTurn ? "clock-active" : ""} ${lowTime ? "clock-low" : ""}`}
+            aria-label={`${color === "w" ? "White" : "Black"} clock ${formatClock(ms)}`}
+          >
+            {formatClock(ms)}
+          </span>
+        ) : (
+          <span className="turn-chip">
+            {hasResult
+              ? "Finished"
+              : !room?.ready && room
+                ? "Waiting"
+                : isAiOpponent && aiConfig.thinking
+                  ? "Thinking…"
+                  : chess.turn() === color
+                    ? "To move"
+                    : "Untimed"}
+          </span>
+        )}
       </div>
     );
   }
@@ -253,7 +277,18 @@ export function ChessBoard({
       </div>
       <div className="board-actions" role="toolbar" aria-label="Game actions">
         {room ? (
-          hasResult ? (
+          room.spectating ? (
+            <button
+              type="button"
+              className="action-pill"
+              data-air
+              aria-label="Flip board"
+              onClick={onFlip}
+            >
+              <RotateCcw size={14} />
+              <span>Flip</span>
+            </button>
+          ) : hasResult ? (
             <button
               type="button"
               className="action-pill primary-pill"

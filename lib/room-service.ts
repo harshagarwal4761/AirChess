@@ -2,7 +2,15 @@ import type { Color } from "chess.js";
 import { eq, and, lt } from "drizzle-orm";
 import { getDb } from "../db";
 import { rooms } from "../db/schema";
-import { applyAction, newGame, type Action, type RoomState } from "./game";
+import {
+  applyAction,
+  newGame,
+  TIME_CONTROLS,
+  type Action,
+  type RoomState,
+  type TimeControlId,
+} from "./game";
+
 export class RoomError extends Error {
   constructor(
     message: string,
@@ -11,7 +19,29 @@ export class RoomError extends Error {
     super(message);
   }
 }
+
 const lifetime = 7 * 24 * 60 * 60 * 1000;
+const roomListeners = new Map<string, Set<() => void>>();
+
+export function subscribeRoom(code: string, listener: () => void) {
+  let set = roomListeners.get(code);
+  if (!set) {
+    set = new Set();
+    roomListeners.set(code, set);
+  }
+  set.add(listener);
+  return () => {
+    set.delete(listener);
+    if (set.size === 0) roomListeners.delete(code);
+  };
+}
+
+function notifyRoom(code: string) {
+  const set = roomListeners.get(code);
+  if (!set) return;
+  for (const listener of set) listener();
+}
+
 async function hash(token: string) {
   const bytes = await crypto.subtle.digest(
     "SHA-256",
@@ -21,6 +51,7 @@ async function hash(token: string) {
     b.toString(16).padStart(2, "0"),
   ).join("");
 }
+
 export async function credential(request: Request) {
   const token =
     request.headers.get("Authorization")?.replace(/^Bearer /, "") ?? "";
@@ -31,6 +62,7 @@ export async function credential(request: Request) {
     );
   return hash(token);
 }
+
 function view(row: typeof rooms.$inferSelect, key: string) {
   const color: Color | null =
     row.white === key ? "w" : row.black === key ? "b" : null;
@@ -42,9 +74,25 @@ function view(row: typeof rooms.$inferSelect, key: string) {
     ready: Boolean(row.black),
     revision: row.revision,
     state: JSON.parse(row.state) as RoomState,
+    spectating: false,
+    serverNow: Date.now(),
   };
 }
-export async function createRoom(key: string) {
+
+function spectatorView(row: typeof rooms.$inferSelect) {
+  return {
+    code: row.code,
+    color: null as Color | null,
+    ready: Boolean(row.black),
+    revision: row.revision,
+    state: JSON.parse(row.state) as RoomState,
+    spectating: true,
+    serverNow: Date.now(),
+  };
+}
+
+export async function createRoom(key: string, timeControl: TimeControlId = "untimed") {
+  const control: TimeControlId = timeControl in TIME_CONTROLS ? timeControl : "untimed";
   const db = getDb();
   const now = Date.now();
   // Best-effort purge of expired rooms so D1 stays bounded.
@@ -56,7 +104,7 @@ export async function createRoom(key: string) {
     const row = {
       code,
       white: key,
-      state: JSON.stringify(newGame()),
+      state: JSON.stringify(newGame(1, control)),
       revision: 0,
       createdAt: now,
       updatedAt: now,
@@ -70,6 +118,28 @@ export async function createRoom(key: string) {
   }
   throw new RoomError("Could not allocate a room. Please try again.", 503);
 }
+
+export async function watchRoom(code: string) {
+  if (!/^\d{6}$/.test(code))
+    throw new RoomError("Enter a six-digit room code.");
+  const db = getDb();
+  const row = await db.select().from(rooms).where(eq(rooms.code, code)).get();
+  if (!row || Date.now() - row.updatedAt > lifetime)
+    throw new RoomError("Room not found or expired. Create a new room.", 404);
+  return spectatorView(row);
+}
+
+export async function getRoomRevision(code: string) {
+  const db = getDb();
+  const row = await db
+    .select({ revision: rooms.revision, updatedAt: rooms.updatedAt })
+    .from(rooms)
+    .where(eq(rooms.code, code))
+    .get();
+  if (!row || Date.now() - row.updatedAt > lifetime) return null;
+  return row.revision;
+}
+
 export async function roomRequest(
   code: string,
   key: string,
@@ -92,6 +162,7 @@ export async function roomRequest(
       .returning();
     if (!updated.length)
       throw new RoomError("The room changed. Try joining again.", 409);
+    notifyRoom(code);
     return view(updated[0], key);
   }
   const current = view(row, key);
@@ -108,7 +179,7 @@ export async function roomRequest(
     );
   let next: RoomState;
   try {
-    next = applyAction(current.state, current.color, body.action);
+    next = applyAction(current.state, current.color, body.action, Date.now());
   } catch (e) {
     throw new RoomError(e instanceof Error ? e.message : "Invalid move.");
   }
@@ -123,8 +194,10 @@ export async function roomRequest(
     .returning();
   if (!updated.length)
     throw new RoomError("Another action arrived first. Please try again.", 409);
+  notifyRoom(code);
   return view(updated[0], key);
 }
+
 export async function respond(fn: () => Promise<unknown>) {
   try {
     return Response.json(await fn(), {
@@ -143,6 +216,7 @@ export async function respond(fn: () => Promise<unknown>) {
     );
   }
 }
+
 export async function readBody(request: Request) {
   const text = await request.text();
   if (new TextEncoder().encode(text).length > 2048)

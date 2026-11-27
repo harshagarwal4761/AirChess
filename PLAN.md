@@ -118,9 +118,10 @@ Phase 8 checks: 36 unit tests, TypeScript validation, production build, and 12 b
 - [x] Run Stockfish WASM in a Web Worker with difficulty presets so solo visitors can play against the computer with gestures or mouse.
 - [x] Add an optional live evaluation bar and post-game best-move hints.
 
-## Phase 13 — real-time multiplayer (Durable Objects) and clocks
-- [ ] Replace HTTP polling with Cloudflare Durable Objects WebSockets with reconnect fallback and live presence.
-- [ ] Add optional blitz/rapid time controls (3+2, 5+0, 10+0) and spectator links.
+## Phase 13 — real-time multiplayer, clocks, and spectators
+- [x] Add real-time SSE room push stream (`/api/rooms/:code/events`) with instant local broadcast, D1 edge sync, and automatic polling fallback.
+- [x] Add optional blitz/rapid time controls (`3+2`, `5+0`, `10+0`) with server-authoritative clock increments and timeout adjudication.
+- [x] Add read-only live spectator mode (`?watch=1`) with live clocks and move stream.
 
 ## Phase 14 — full-stack auth, D1 match history, and player profiles
 - [ ] Add GitHub OAuth + guest accounts with HTTP-only sessions and expanded Drizzle/D1 schema (`users`, `games`, `ratings`).

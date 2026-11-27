@@ -1897,6 +1897,36 @@ h2 {
     grid-column: auto;
   }
 }
+.clock-chip {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 6px 11px;
+  border-radius: 7px;
+  background: #ffffff08;
+  border: 1px solid #cde2c524;
+  color: #b7c8ba;
+  min-width: 64px;
+  text-align: center;
+}
+.clock-chip.clock-active {
+  background: #bfead624;
+  border-color: var(--mint);
+  color: #eefcf0;
+}
+.clock-chip.clock-low {
+  background: #b3655733;
+  border-color: #ef9885;
+  color: #ffd5cb;
+}
+.clock-picker {
+  align-items: center;
+  margin-top: 10px;
+}
+.clock-icon {
+  color: #93aa97;
+  flex-shrink: 0;
+}
 @media (prefers-reduced-motion: reduce) {
   .eval-fill { transition: none; }
   .piece, .signature-knight { transition: none; }

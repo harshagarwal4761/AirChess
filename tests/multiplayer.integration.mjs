@@ -137,6 +137,31 @@ r = await request(`/${code}`, black, {
   action: { type: "resign" },
 });
 assert.equal(r.state.result.winner, "w");
+
+// Spectator read-only view & timed room creation.
+const timed = await request("", white, { type: "create", timeControl: "blitz3_2" });
+assert.equal(timed.state.clock.control, "blitz3_2");
+assert.equal(timed.state.clock.wMs, 180000);
+await request(`/${timed.code}`, black, { type: "join" });
+const watchRes = await fetch(`${origin}/api/rooms/${timed.code}?watch=1`);
+assert.equal(watchRes.status, 200);
+const watchData = await watchRes.json();
+assert.equal(watchData.spectating, true);
+assert.equal(watchData.color, null);
+assert.ok(!("white" in watchData) && !("black" in watchData));
+
+// SSE event stream emits initial state snapshot cleanly.
+const sseAbort = new AbortController();
+const sseRes = await fetch(`${origin}/api/rooms/${timed.code}/events?watch=1`, {
+  signal: sseAbort.signal,
+});
+assert.equal(sseRes.status, 200);
+assert.match(sseRes.headers.get("content-type") ?? "", /text\/event-stream/);
+const reader = sseRes.body.getReader();
+const chunk = new TextDecoder().decode((await reader.read()).value);
+assert.match(chunk, /event: state/);
+sseAbort.abort();
+
 console.log(
-  "Multiplayer integration passed: create, seats, auth, legal turns, stale/racing writes, reconnect, draw, rematch, resign.",
+  "Multiplayer integration passed: create, seats, auth, legal turns, stale/racing writes, reconnect, draw, rematch, resign, timed clocks, spectators, and SSE stream.",
 );

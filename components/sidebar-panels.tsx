@@ -12,8 +12,10 @@ import {
   ChevronLast,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Copy,
   Download,
+  Eye,
   Hand,
   Lightbulb,
   Link2,
@@ -23,7 +25,7 @@ import {
 } from "lucide-react";
 import type { AimMode } from "../lib/air-pointer";
 import type { GestureLabel } from "../lib/gesture-features";
-import type { RoomState } from "../lib/game";
+import { TIME_CONTROLS, type RoomState, type TimeControlId } from "../lib/game";
 import type { PlayMode } from "../lib/preferences";
 import { DIFFICULTY_PRESETS, type DifficultyPreset } from "../lib/stockfish";
 import { MovableSurface } from "./movable-surface";
@@ -50,8 +52,9 @@ type HandSummary = {
 
 type RoomSummary = {
   code: string;
-  color: Color;
+  color: Color | null;
   ready: boolean;
+  spectating?: boolean;
 } | null;
 
 type Props = {
@@ -65,6 +68,8 @@ type Props = {
   room: RoomSummary;
   playMode: PlayMode;
   onPlayModeChange: (mode: PlayMode) => void;
+  timeControl: TimeControlId;
+  onTimeControlChange: (tc: TimeControlId) => void;
   aiDifficulty: DifficultyPreset;
   onAiDifficultyChange: (difficulty: DifficultyPreset) => void;
   aiColor: Color;
@@ -83,16 +88,21 @@ type Props = {
   busy: boolean;
   hydrated: boolean;
   copied: boolean;
+  watchCopied: boolean;
+  connection: string;
   muted: boolean;
   onToggleMuted: () => void;
   onConnectCreate: () => void;
   onOpenJoin: () => void;
   onCopyInvite: () => void;
+  onCopyWatchLink: () => void;
+  onLeaveWatch: () => void;
   onOpenModal: (modal: "leave" | "resign" | "reset") => void;
   onDownloadPgn: () => void;
 };
 
 const difficulties: DifficultyPreset[] = ["casual", "club", "master"];
+const timeControlIds: TimeControlId[] = ["untimed", "blitz3_2", "blitz5_0", "rapid10_0"];
 
 export function SidebarPanels({
   arranging,
@@ -105,6 +115,8 @@ export function SidebarPanels({
   room,
   playMode,
   onPlayModeChange,
+  timeControl,
+  onTimeControlChange,
   aiDifficulty,
   onAiDifficultyChange,
   aiColor,
@@ -123,11 +135,15 @@ export function SidebarPanels({
   busy,
   hydrated,
   copied,
+  watchCopied,
+  connection,
   muted,
   onToggleMuted,
   onConnectCreate,
   onOpenJoin,
   onCopyInvite,
+  onCopyWatchLink,
+  onLeaveWatch,
   onOpenModal,
   onDownloadPgn,
 }: Props) {
@@ -285,23 +301,44 @@ export function SidebarPanels({
         )}
 
         {room ? (
-          <>
-            <h2>{room.ready ? "Two players. One board." : "Your friend has a seat."}</h2>
-            <p>Share the code. They join from their own laptop.</p>
-            <button type="button" className="room-code" data-air onClick={onCopyInvite} aria-label="Copy room invite">
-              {room.code}
-              <span>{copied ? <Check size={16} /> : <Copy size={16} />}</span>
-            </button>
-            <div className="room-details">
-              <span className="tiny-dot" />
-              {room.ready
-                ? `You’re ${room.color === "w" ? "White" : "Black"} · Game ${state.game}`
-                : "Waiting for a second player"}
-              <button type="button" className="text-button" data-air onClick={() => onOpenModal("leave")}>
-                Leave
+          room.spectating ? (
+            <>
+              <h2>Spectator view · Room {room.code}</h2>
+              <p>Read-only live board via stream ({connection || "Connected"}).</p>
+              <div className="room-details">
+                <span className="tiny-dot" />
+                {room.ready ? `Live · Game ${state.game}` : "Waiting for Black seat"}
+                <button type="button" className="text-button" data-air onClick={onLeaveWatch}>
+                  Exit watch
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2>{room.ready ? "Two players. One board." : "Your friend has a seat."}</h2>
+              <p>
+                {state.clock
+                  ? `${TIME_CONTROLS[state.clock.control].label} clock · ${connection || "Live"}`
+                  : `Share the code · ${connection || "Live"}`}
+              </p>
+              <button type="button" className="room-code" data-air onClick={onCopyInvite} aria-label="Copy room invite">
+                {room.code}
+                <span>{copied ? <Check size={16} /> : <Copy size={16} />}</span>
               </button>
-            </div>
-          </>
+              <div className="room-details">
+                <span className="tiny-dot" />
+                {room.ready
+                  ? `You’re ${room.color === "w" ? "White" : "Black"} · Game ${state.game}`
+                  : "Waiting for a second player"}
+                <button type="button" className="text-button" data-air onClick={onCopyWatchLink}>
+                  <Eye size={12} /> {watchCopied ? "Copied!" : "Watch link"}
+                </button>
+                <button type="button" className="text-button" data-air onClick={() => onOpenModal("leave")}>
+                  Leave
+                </button>
+              </div>
+            </>
+          )
         ) : activeTab === "ai" ? (
           <div className="ai-options">
             <div className="ai-row" role="group" aria-label="Stockfish difficulty">
@@ -338,6 +375,20 @@ export function SidebarPanels({
                 Play Black
               </button>
             </div>
+            <div className="ai-row" role="group" aria-label="Time control">
+              {timeControlIds.map((tc) => (
+                <button
+                  key={tc}
+                  type="button"
+                  data-air
+                  className={`mini-chip ${timeControl === tc ? "active" : ""}`}
+                  aria-pressed={timeControl === tc}
+                  onClick={() => onTimeControlChange(tc)}
+                >
+                  {TIME_CONTROLS[tc].label}
+                </button>
+              ))}
+            </div>
             <p className="ai-note">
               {aiThinking
                 ? "Stockfish is calculating…"
@@ -351,7 +402,22 @@ export function SidebarPanels({
           </div>
         ) : activeTab === "online" ? (
           <div className="online-setup">
-            <p>Play a friend on a separate laptop with a 6-digit room code.</p>
+            <p>Play a friend on a separate laptop with live sync &amp; optional clocks.</p>
+            <div className="ai-row clock-picker" role="group" aria-label="Room time control">
+              <Clock size={13} className="clock-icon" />
+              {timeControlIds.map((tc) => (
+                <button
+                  key={tc}
+                  type="button"
+                  data-air
+                  className={`mini-chip ${timeControl === tc ? "active" : ""}`}
+                  aria-pressed={timeControl === tc}
+                  onClick={() => onTimeControlChange(tc)}
+                >
+                  {TIME_CONTROLS[tc].label}
+                </button>
+              ))}
+            </div>
             <div className="button-row">
               <button
                 type="button"
@@ -370,9 +436,25 @@ export function SidebarPanels({
             </div>
           </div>
         ) : (
-          <p className="ai-note">
-            Play both sides locally on one board, or switch to vs Stockfish or Online above.
-          </p>
+          <div className="ai-options">
+            <div className="ai-row" role="group" aria-label="Time control">
+              {timeControlIds.map((tc) => (
+                <button
+                  key={tc}
+                  type="button"
+                  data-air
+                  className={`mini-chip ${timeControl === tc ? "active" : ""}`}
+                  aria-pressed={timeControl === tc}
+                  onClick={() => onTimeControlChange(tc)}
+                >
+                  {TIME_CONTROLS[tc].label}
+                </button>
+              ))}
+            </div>
+            <p className="ai-note">
+              Play both sides locally on one board, or switch to vs Stockfish or Online above.
+            </p>
+          </div>
         )}
       </MovableSurface>
 

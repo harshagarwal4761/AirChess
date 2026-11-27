@@ -1,7 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Chess } from "chess.js";
-import { applyAction, materialSummary, newGame, outcome, replay, undoLocalMove } from "../lib/game";
+import {
+  applyAction,
+  effectiveClocks,
+  formatClock,
+  materialSummary,
+  newGame,
+  outcome,
+  replay,
+  undoLocalMove,
+} from "../lib/game";
 test("legal moves alternate and reject wrong player and illegal moves", () => {
   const state = applyAction(newGame(), "w", {
     type: "move",
@@ -97,4 +106,26 @@ test("replay supports ply slicing, local undo, and material summary", () => {
   assert.equal(summary.blackAdvantage, 0);
   const undone = undoLocalMove({ ...newGame(), moves });
   assert.deepEqual(undone.moves, ["e4", "d5", "exd5"]);
+});
+test("timed clocks deduct elapsed time, apply increment, and adjudicate timeouts", () => {
+  let s = newGame(1, "blitz3_2");
+  assert.equal(formatClock(180_000), "3:00");
+  assert.equal(formatClock(5_400), "5.4s");
+  // Move 1 starts the clock without draining White before the game starts.
+  s = applyAction(s, "w", { type: "move", from: "e2", to: "e4" }, 1000);
+  assert.equal(s.clock?.wMs, 180_000);
+  assert.equal(s.clock?.lastTickAt, 1000);
+  // Black thinks 5 seconds then plays e5 and receives +2s increment.
+  s = applyAction(s, "b", { type: "move", from: "e7", to: "e5" }, 6000);
+  assert.equal(s.clock?.bMs, 177_000);
+  assert.equal(effectiveClocks(s, "w", 186_000)?.timedOut, "w");
+  assert.throws(() => applyAction(s, "b", { type: "flag" }, 10_000), /expired/);
+  const flagged = applyAction(s, "b", { type: "flag" }, 190_000);
+  assert.equal(flagged.result?.winner, "b");
+  assert.match(flagged.result!.text, /time/);
+  // Rematch preserves time control.
+  s = applyAction(flagged, "w", { type: "rematch" }, 191_000);
+  s = applyAction(s, "b", { type: "rematch" }, 192_000);
+  assert.equal(s.clock?.control, "blitz3_2");
+  assert.equal(s.clock?.wMs, 180_000);
 });

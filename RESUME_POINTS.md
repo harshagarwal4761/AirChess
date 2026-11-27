@@ -11,7 +11,8 @@ Keep this file updated as features land so every bullet is backed by actual impl
 
 ### Full-Stack & Distributed State
 - **Built a server-authoritative multiplayer chess backend on Cloudflare Workers & D1 (SQLite) using Drizzle ORM**, enforcing legal move replay via `chess.js`, per-tab SHA-256 bearer session authentication, and compare-and-swap optimistic concurrency (`WHERE code = ? AND revision = ?`) to prevent race conditions and double-seat joins.
-- **Engineered client-side state synchronization and resilience**, handling tab-visibility-aware polling (`visibilitychange` fast wake), monotonic revision guards against out-of-order responses, fatal vs. transient HTTP error recovery, and opportunistic expired-room pruning in D1.
+- **Engineered real-time room synchronization via Server-Sent Events (`/api/rooms/:code/events`) with in-memory pub/sub push, D1 revision checks, and automatic polling fallback**, delivering sub-10ms local updates, `visibilitychange` fast wake, monotonic revision guards, and read-only live **Spectator mode** (`?watch=1`).
+- **Implemented server-authoritative blitz/rapid chess clocks (`3+2`, `5+0`, `10+0`)**, calculating elapsed turn time from server timestamps (`serverNow` clock-skew sync), increment application, and CAS-protected timeout adjudication (`flag` action + insufficient-material draw check).
 
 ### Computer Vision & Real-Time Performance
 - **Integrated MediaPipe Hand Landmarker (21 3D keypoints) inside a dedicated Web Worker** to keep webcam inference off the UI thread, processing live frames without queuing (`requestVideoFrameCallback` + stalled-frame watchdog) with GPU/CPU fallback and zero server-side camera uploads.
@@ -22,7 +23,7 @@ Keep this file updated as features land so every bullet is backed by actual impl
 
 ### Frontend Architecture, Accessibility & UX
 - **Modularized a 1,200+ line client page into typed React components** with zero React 19 compiler hook lint errors, custom cross-platform Staunton SVG pieces, 3 board themes with 0–100% camera overlay transparency, draggable/keyboard-nudgeable panels (`MovableSurface`), interactive move-history scrubbing, material advantage tracking, and synthesized Web Audio feedback.
-- **Verified core reliability with 44+ automated unit tests (`node:test`) and D1 integration tests**, covering chess special rules (castling, en passant, promotion, repetition), gesture state machines, layout clamping, Stockfish UCI parsing, and concurrent multiplayer API writes.
+- **Verified core reliability with 47 automated unit tests (`node:test`) and D1 integration tests**, covering chess special rules (castling, en passant, promotion, repetition), timed clock increments/timeouts, custom MLP gesture classification, layout clamping, Stockfish UCI parsing, concurrent multiplayer writes, spectators, and SSE streaming.
 
 ---
 
@@ -33,5 +34,4 @@ Keep this file updated as features land so every bullet is backed by actual impl
 ---
 
 ## Upcoming Additions (Add Metrics Once Implemented & Measured)
-- **Phase 13 (Planned):** Cloudflare Durable Objects WebSockets + server-authoritative blitz/rapid clocks + spectator mode.
 - **Phase 14 (Planned):** GitHub OAuth + HTTP-only sessions, relational user/game archive in D1, and Elo rating progression.

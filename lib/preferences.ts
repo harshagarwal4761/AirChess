@@ -1,6 +1,6 @@
 import type { Color } from "chess.js";
 import type { AimMode } from "./air-pointer";
-import { newGame, replay, type RoomState } from "./game";
+import { newGame, replay, TIME_CONTROLS, type RoomState, type TimeControlId } from "./game";
 import type { DifficultyPreset } from "./stockfish";
 
 export type BoardTheme = "emerald" | "slate" | "walnut";
@@ -19,6 +19,7 @@ export type Preferences = {
   aiColor: Color;
   showEval: boolean;
   twoHandPause: boolean;
+  timeControl: TimeControlId;
 };
 
 export const defaultPreferences: Preferences = {
@@ -34,6 +35,7 @@ export const defaultPreferences: Preferences = {
   aiColor: "w",
   showEval: false,
   twoHandPause: false,
+  timeControl: "untimed",
 };
 
 const PRACTICE_KEY = "airchess.practice.v1";
@@ -64,6 +66,7 @@ export function readPreferences(): Preferences {
   const playMode = safeGet("airchess.playMode");
   const diff = safeGet("airchess.aiDifficulty");
   const aiColor = safeGet("airchess.aiColor");
+  const tc = safeGet("airchess.timeControl") as TimeControlId | null;
   return {
     opacity: parsedOpacity,
     focusMode: safeGet("airchess.focus") === "true",
@@ -77,6 +80,7 @@ export function readPreferences(): Preferences {
     aiColor: aiColor === "b" ? "b" : "w",
     showEval: safeGet("airchess.showEval") === "true",
     twoHandPause: safeGet("airchess.twoHandPause") === "true",
+    timeControl: tc && tc in TIME_CONTROLS ? tc : "untimed",
   };
 }
 
@@ -94,6 +98,7 @@ export function readPracticeState(): RoomState {
       drawOffer: parsed.drawOffer ?? null,
       rematch: parsed.rematch ?? null,
       game: parsed.game,
+      clock: parsed.clock ?? null,
     };
   } catch {
     return newGame();

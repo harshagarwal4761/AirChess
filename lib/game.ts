@@ -1,14 +1,71 @@
 import { Chess, type Color } from "chess.js";
 export type Result = { text: string; winner: Color | null };
+export type TimeControlId = "untimed" | "blitz3_2" | "blitz5_0" | "rapid10_0";
+export type ClockState = {
+  control: TimeControlId;
+  wMs: number;
+  bMs: number;
+  incrementMs: number;
+  lastTickAt: number | null;
+};
+export const TIME_CONTROLS: Record<
+  TimeControlId,
+  { id: TimeControlId; label: string; baseMs: number; incrementMs: number }
+> = {
+  untimed: { id: "untimed", label: "Untimed", baseMs: 0, incrementMs: 0 },
+  blitz3_2: { id: "blitz3_2", label: "3+2", baseMs: 180_000, incrementMs: 2_000 },
+  blitz5_0: { id: "blitz5_0", label: "5+0", baseMs: 300_000, incrementMs: 0 },
+  rapid10_0: { id: "rapid10_0", label: "10+0", baseMs: 600_000, incrementMs: 0 },
+};
 export type RoomState = {
   moves: string[];
   result: Result | null;
   drawOffer: Color | null;
   rematch: Color | null;
   game: number;
+  clock?: ClockState | null;
 };
-export function newGame(game = 1): RoomState {
-  return { moves: [], result: null, drawOffer: null, rematch: null, game };
+export function newGame(game = 1, timeControl: TimeControlId = "untimed"): RoomState {
+  const cfg = TIME_CONTROLS[timeControl] ?? TIME_CONTROLS.untimed;
+  return {
+    moves: [],
+    result: null,
+    drawOffer: null,
+    rematch: null,
+    game,
+    clock:
+      cfg.id === "untimed"
+        ? null
+        : {
+            control: cfg.id,
+            wMs: cfg.baseMs,
+            bMs: cfg.baseMs,
+            incrementMs: cfg.incrementMs,
+            lastTickAt: null,
+          },
+  };
+}
+export function effectiveClocks(state: RoomState, turn: Color, now: number) {
+  const c = state.clock;
+  if (!c) return null;
+  if (state.result || c.lastTickAt === null) {
+    return { wMs: c.wMs, bMs: c.bMs, timedOut: null as Color | null };
+  }
+  const elapsed = Math.max(0, now - c.lastTickAt);
+  const wMs = turn === "w" ? Math.max(0, c.wMs - elapsed) : c.wMs;
+  const bMs = turn === "b" ? Math.max(0, c.bMs - elapsed) : c.bMs;
+  const timedOut: Color | null = wMs === 0 ? "w" : bMs === 0 ? "b" : null;
+  return { wMs, bMs, timedOut };
+}
+export function formatClock(ms: number): string {
+  const safe = Math.max(0, ms);
+  if (safe < 10_000) {
+    return `${(safe / 1000).toFixed(1)}s`;
+  }
+  const totalSec = Math.ceil(safe / 1000);
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 export function replay(moves: string[], ply = moves.length) {
   const chess = new Chess();
@@ -75,21 +132,56 @@ export type Action =
         | "offer-draw"
         | "accept-draw"
         | "decline-draw"
-        | "rematch";
+        | "rematch"
+        | "flag";
     };
+function timeoutOutcome(chess: Chess, flagged: Color): Result {
+  // Check whether the opponent has only a bare king (insufficient material).
+  const winner: Color = flagged === "w" ? "b" : "w";
+  const opponentPieces = chess
+    .board()
+    .flat()
+    .filter((p) => p && p.color === winner && p.type !== "k");
+  if (opponentPieces.length === 0) {
+    return { text: "Draw — timeout vs insufficient material", winner: null };
+  }
+  return {
+    text: `${winner === "w" ? "White" : "Black"} wins on time`,
+    winner,
+  };
+}
 export function applyAction(
   state: RoomState,
   color: Color,
   action: Action,
+  now = Date.now(),
 ): RoomState {
   if (action.type === "rematch") {
     if (!state.result)
       throw new Error("Finish this game before requesting a rematch.");
     return state.rematch && state.rematch !== color
-      ? newGame(state.game + 1)
+      ? newGame(state.game + 1, state.clock?.control ?? "untimed")
       : { ...state, rematch: color };
   }
   if (state.result) throw new Error("This game has ended.");
+  if (action.type === "flag") {
+    const chess = replay(state.moves);
+    const clocks = effectiveClocks(state, chess.turn(), now);
+    if (!clocks || !clocks.timedOut) {
+      throw new Error("Clock has not expired.");
+    }
+    return {
+      ...state,
+      clock: {
+        ...state.clock!,
+        wMs: clocks.wMs,
+        bMs: clocks.bMs,
+        lastTickAt: null,
+      },
+      drawOffer: null,
+      result: timeoutOutcome(chess, clocks.timedOut),
+    };
+  }
   if (action.type === "resign")
     return {
       ...state,
@@ -98,6 +190,7 @@ export function applyAction(
         winner: color === "w" ? "b" : "w",
       },
       drawOffer: null,
+      clock: state.clock ? { ...state.clock, lastTickAt: null } : null,
     };
   if (action.type === "offer-draw") {
     if (state.drawOffer && state.drawOffer !== color)
@@ -110,6 +203,10 @@ export function applyAction(
     return {
       ...state,
       drawOffer: null,
+      clock:
+        action.type === "accept-draw" && state.clock
+          ? { ...state.clock, lastTickAt: null }
+          : state.clock,
       result:
         action.type === "accept-draw"
           ? { text: "Draw by agreement", winner: null }
@@ -119,6 +216,20 @@ export function applyAction(
   if (action.type !== "move") throw new Error("Unknown action.");
   const chess = replay(state.moves);
   if (chess.turn() !== color) throw new Error("Wait for your turn.");
+  const clocks = effectiveClocks(state, color, now);
+  if (clocks?.timedOut === color) {
+    return {
+      ...state,
+      clock: {
+        ...state.clock!,
+        wMs: clocks.wMs,
+        bMs: clocks.bMs,
+        lastTickAt: null,
+      },
+      drawOffer: null,
+      result: timeoutOutcome(chess, color),
+    };
+  }
   const candidates = chess
     .moves({ verbose: true })
     .filter((m) => m.from === action.from && m.to === action.to);
@@ -133,11 +244,31 @@ export function applyAction(
     to: action.to,
     promotion: action.promotion,
   });
+  const nextResult = outcome(chess);
+  let nextClock = state.clock ?? null;
+  if (nextClock && clocks) {
+    const startTick = state.moves.length >= 1;
+    const wMs =
+      color === "w"
+        ? clocks.wMs + (startTick ? nextClock.incrementMs : 0)
+        : clocks.wMs;
+    const bMs =
+      color === "b"
+        ? clocks.bMs + (startTick ? nextClock.incrementMs : 0)
+        : clocks.bMs;
+    nextClock = {
+      ...nextClock,
+      wMs,
+      bMs,
+      lastTickAt: nextResult ? null : now,
+    };
+  }
   return {
     ...state,
     moves: [...state.moves, move.san],
     drawOffer: null,
-    result: outcome(chess),
+    result: nextResult,
+    clock: nextClock,
   };
 }
 export const pieceNames: Record<string, string> = {

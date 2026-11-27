@@ -10,7 +10,17 @@ import { useHandTracking, type AirEvent } from "../hooks/use-hand-tracking";
 import { useStockfish } from "../hooks/use-stockfish";
 import { practiceOrientation } from "../lib/air-controls";
 import type { AimMode } from "../lib/air-pointer";
-import { applyAction, newGame, replay, undoLocalMove, type Action, type RoomState } from "../lib/game";
+import {
+  applyAction,
+  effectiveClocks,
+  newGame,
+  replay,
+  TIME_CONTROLS,
+  undoLocalMove,
+  type Action,
+  type RoomState,
+  type TimeControlId,
+} from "../lib/game";
 import { resetPanelLayout } from "../lib/panel-layout";
 import {
   defaultPreferences,
@@ -26,10 +36,12 @@ import { DIFFICULTY_PRESETS, type DifficultyPreset } from "../lib/stockfish";
 
 type Room = {
   code: string;
-  color: Color;
+  color: Color | null;
   ready: boolean;
   revision: number;
   state: RoomState;
+  spectating?: boolean;
+  serverNow?: number;
 };
 
 class ApiError extends Error {
@@ -75,6 +87,7 @@ export default function AirChess() {
   const [aimMode, setAimMode] = useState<AimMode>(defaultPreferences.aimMode);
   const [boardTheme, setBoardTheme] = useState<BoardTheme>(defaultPreferences.boardTheme);
   const [playMode, setPlayMode] = useState<PlayMode>(defaultPreferences.playMode);
+  const [timeControl, setTimeControl] = useState<TimeControlId>(defaultPreferences.timeControl);
   const [aiDifficulty, setAiDifficulty] = useState<DifficultyPreset>(defaultPreferences.aiDifficulty);
   const [aiColor, setAiColor] = useState<Color>(defaultPreferences.aiColor);
   const [showEval, setShowEval] = useState(defaultPreferences.showEval);
@@ -84,14 +97,18 @@ export default function AirChess() {
   const [focusMode, setFocusMode] = useState(defaultPreferences.focusMode);
   const [arranging, setArranging] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [watchCopied, setWatchCopied] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [viewPly, setViewPly] = useState<number | null>(null);
+  const [clockOffset, setClockOffset] = useState(0);
+  const [clockNow, setClockNow] = useState(() => Date.now());
 
   const keyRef = useRef("");
   const roomRef = useRef<Room | null>(null);
   const busyRef = useRef(false);
   const audioRef = useRef<AudioContext | null>(null);
   const practiceLoadedRef = useRef(false);
+  const flaggedRevRef = useRef<number | null>(null);
 
   useEffect(() => {
     roomRef.current = room;
@@ -109,9 +126,35 @@ export default function AirChess() {
   );
   const orientation =
     room?.color ??
-    (playMode === "ai"
-      ? aiColor
-      : practiceOrientation(liveChess.turn(), followTurn, flipped));
+    (room?.spectating
+      ? flipped
+        ? "b"
+        : "w"
+      : playMode === "ai"
+        ? aiColor
+        : practiceOrientation(liveChess.turn(), followTurn, flipped));
+
+  const clockRunning = Boolean(
+    state.clock &&
+      !state.result &&
+      state.clock.lastTickAt !== null &&
+      (!room || room.ready),
+  );
+  useEffect(() => {
+    if (!clockRunning) return;
+    const id = setInterval(() => setClockNow(Date.now()), 100);
+    return () => clearInterval(id);
+  }, [clockRunning]);
+
+  const clocks = useMemo(
+    () =>
+      effectiveClocks(
+        state,
+        liveChess.turn(),
+        clockNow + (room ? clockOffset : 0),
+      ),
+    [state, liveChess, clockNow, room, clockOffset],
+  );
 
   const engineEnabled = hydrated && ((!room && playMode === "ai") || (analysisAllowed && (showEval || hintVisible)));
   const {
@@ -147,6 +190,13 @@ export default function AirChess() {
     setPlayMode(value);
     safeSet("airchess.playMode", value);
     setSelected(null);
+  }
+  function changeTimeControl(value: TimeControlId) {
+    setTimeControl(value);
+    safeSet("airchess.timeControl", value);
+    if (!room && local.moves.length === 0 && !local.result) {
+      setLocal(newGame(local.game, value));
+    }
   }
   function changeAiDifficulty(value: DifficultyPreset) {
     setAiDifficulty(value);
@@ -194,7 +244,7 @@ export default function AirChess() {
     !busy &&
     !isReviewing &&
     (room
-      ? room.ready && room.color === liveChess.turn()
+      ? !room.spectating && room.ready && room.color === liveChess.turn()
       : playMode !== "ai" || (liveChess.turn() === aiColor && !aiThinking));
 
   const legal = useMemo(
@@ -283,14 +333,17 @@ export default function AirChess() {
     return () => clearTimeout(t);
   }, [notice]);
 
-  const acceptRoom = useCallback((next: Room) => {
+  const acceptRoom = useCallback((next: Room, via = "Connected") => {
+    if (typeof next.serverNow === "number") {
+      setClockOffset(next.serverNow - Date.now());
+    }
     setRoom((previous) =>
       previous && previous.code === next.code && previous.revision > next.revision
         ? previous
         : next,
     );
-    sessionStorage.setItem("airchess.room", next.code);
-    setConnection("Connected");
+    if (!next.spectating) sessionStorage.setItem("airchess.room", next.code);
+    setConnection(via);
   }, []);
 
   const api = useCallback(async (path: string, body?: unknown) => {
@@ -314,7 +367,9 @@ export default function AirChess() {
     keyRef.current = sessionStorage.getItem("airchess.key") ?? crypto.randomUUID();
     sessionStorage.setItem("airchess.key", keyRef.current);
     const savedRoom = sessionStorage.getItem("airchess.room");
-    const invite = new URLSearchParams(location.search).get("room");
+    const params = new URLSearchParams(location.search);
+    const invite = params.get("room");
+    const watch = params.get("watch") === "1";
     queueMicrotask(() => {
       setFocusMode(prefs.focusMode);
       setOpacity(prefs.opacity);
@@ -324,19 +379,28 @@ export default function AirChess() {
       setMuted(prefs.muted);
       setBoardTheme(prefs.boardTheme);
       setPlayMode(prefs.playMode);
+      setTimeControl(prefs.timeControl);
       setAiDifficulty(prefs.aiDifficulty);
       setAiColor(prefs.aiColor);
       setShowEval(prefs.showEval);
       setTwoHandPause(prefs.twoHandPause);
       setLocal(savedPractice);
       practiceLoadedRef.current = true;
-      if (invite && /^\d{6}$/.test(invite) && invite !== savedRoom) {
+      if (invite && /^\d{6}$/.test(invite) && watch) {
+        setConnection("Connecting to stream…");
+        api(`/${invite}?watch=1`)
+          .then((r) => acceptRoom(r, "Live watch"))
+          .catch((e) => {
+            setNotice(e instanceof Error ? e.message : "Could not open spectator view.");
+            setConnection("");
+          });
+      } else if (invite && /^\d{6}$/.test(invite) && invite !== savedRoom) {
         setJoinCode(invite);
         setModal("join");
       } else if (savedRoom) {
         setConnection("Reconnecting…");
         api(`/${savedRoom}`)
-          .then(acceptRoom)
+          .then((r) => acceptRoom(r, "Connected"))
           .catch((e) => {
             setNotice(e instanceof Error ? e.message : "Could not reconnect to room.");
             setConnection("");
@@ -359,42 +423,112 @@ export default function AirChess() {
     if (!room?.code) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
-    const schedule = () => {
-      if (active) timer = setTimeout(poll, document.hidden ? 4000 : 900);
+    let streamAbort: AbortController | null = null;
+    const suffix = room.spectating ? "?watch=1" : "";
+
+    const handleFatal = (message: string) => {
+      if (!active) return;
+      if (!room.spectating) sessionStorage.removeItem("airchess.room");
+      setRoom(null);
+      roomRef.current = null;
+      setConnection("");
+      setNotice(message);
     };
-    const poll = async () => {
+
+    const pollOnce = async () => {
       try {
-        const next = await api(`/${room.code}`);
-        if (active) acceptRoom(next);
-        schedule();
+        const next = await api(`/${room.code}${suffix}`);
+        if (active) acceptRoom(next, room.spectating ? "Watch polling" : "Polling");
       } catch (e) {
         if (!active) return;
         if (e instanceof ApiError && (e.status === 401 || e.status === 403 || e.status === 404)) {
-          sessionStorage.removeItem("airchess.room");
-          setRoom(null);
-          roomRef.current = null;
-          setConnection("");
-          setNotice(e.message);
+          handleFatal(e.message);
           return;
         }
         setConnection("Reconnecting… moves paused");
-        schedule();
+      }
+      if (active) timer = setTimeout(pollOnce, document.hidden ? 4000 : 1200);
+    };
+
+    const connectStream = async () => {
+      if (!active) return;
+      streamAbort = new AbortController();
+      try {
+        const res = await fetch(`/api/rooms/${room.code}/events${suffix}`, {
+          headers: room.spectating ? undefined : { Authorization: `Bearer ${keyRef.current}` },
+          signal: streamAbort.signal,
+        });
+        if (!res.ok || !res.body) {
+          if (res.status === 401 || res.status === 403 || res.status === 404) {
+            const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+            handleFatal(errBody.error ?? "Room unavailable.");
+            return;
+          }
+          throw new Error("Stream failed");
+        }
+        if (active) setConnection(room.spectating ? "Live watch" : "Live stream");
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let eventName = "message";
+
+        while (active) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const rawLine of lines) {
+            const line = rawLine.trimEnd();
+            if (!line) {
+              eventName = "message";
+              continue;
+            }
+            if (line.startsWith("event:")) {
+              eventName = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              const payload = line.slice(5).trim();
+              try {
+                const parsed = JSON.parse(payload) as Room & { error?: string };
+                if (eventName === "closed") {
+                  handleFatal(parsed.error ?? "Room expired.");
+                  return;
+                }
+                if (eventName === "state" && active) {
+                  acceptRoom(parsed, room.spectating ? "Live watch" : "Live stream");
+                }
+              } catch {
+                /* Ignore malformed SSE chunk. */
+              }
+            }
+          }
+        }
+        if (active) {
+          timer = setTimeout(() => void connectStream(), 150);
+        }
+      } catch (e) {
+        if (!active || (e instanceof DOMException && e.name === "AbortError")) return;
+        setConnection("Reconnecting…");
+        timer = setTimeout(pollOnce, 900);
       }
     };
+
     const onVisibility = () => {
       if (!document.hidden && active) {
         clearTimeout(timer);
-        void poll();
+        streamAbort?.abort();
+        void connectStream();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
-    timer = setTimeout(poll, 900);
+    void connectStream();
     return () => {
       active = false;
       clearTimeout(timer);
+      streamAbort?.abort();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [room?.code, api, acceptRoom]);
+  }, [room?.code, room?.spectating, api, acceptRoom]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -448,7 +582,10 @@ export default function AirChess() {
     busyRef.current = true;
     setBusy(true);
     try {
-      const next = await api(kind === "create" ? "" : `/${joinCode}`, { type: kind });
+      const next = await api(
+        kind === "create" ? "" : `/${joinCode}`,
+        kind === "create" ? { type: "create", timeControl } : { type: "join" },
+      );
       acceptRoom(next);
       historyReplace();
       setModal(null);
@@ -582,6 +719,49 @@ export default function AirChess() {
           ? "Stockfish is thinking…"
           : "Stockfish to move"
         : `${liveChess.turn() === "w" ? "White" : "Black"} to move${liveChess.isCheck() ? " · Check!" : ""}`);
+
+  useEffect(() => {
+    if (!clocks?.timedOut || state.result) return;
+    if (!room) {
+      queueMicrotask(() => {
+        setLocal((prev) => {
+          if (prev.result) return prev;
+          try {
+            const next = applyAction(prev, liveChess.turn(), { type: "flag" }, clockNow);
+            playSound("end");
+            return next;
+          } catch {
+            return prev;
+          }
+        });
+      });
+      return;
+    }
+    if (room.spectating || flaggedRevRef.current === room.revision) return;
+    flaggedRevRef.current = room.revision;
+    void api(`/${room.code}`, {
+      type: "action",
+      revision: room.revision,
+      action: { type: "flag" },
+    })
+      .then((next) => {
+        acceptRoom(next);
+        playSound("end");
+      })
+      .catch(() => {
+        flaggedRevRef.current = null;
+      });
+  }, [clocks?.timedOut, state.result, room, liveChess, clockNow, api, acceptRoom, playSound]);
+
+  async function copyWatchLink() {
+    try {
+      await navigator.clipboard.writeText(`${location.origin}/?room=${room!.code}&watch=1`);
+      setWatchCopied(true);
+      setTimeout(() => setWatchCopied(false), 2500);
+    } catch {
+      setNotice(`Share spectator link: ${location.origin}/?room=${room!.code}&watch=1`);
+    }
+  }
 
   async function copyInvite() {
     try {
@@ -732,10 +912,16 @@ export default function AirChess() {
             </div>
             <div className="session-label">
               <span className={room ? "tiny-dot" : "hollow-dot"} />
-              {room ? `Room ${room.code}` : playMode === "ai" ? "vs Stockfish" : "Practice space"}
+              {room
+                ? room.spectating
+                  ? `Watching ${room.code}`
+                  : `Room ${room.code}`
+                : playMode === "ai"
+                  ? "vs Stockfish"
+                  : "Practice space"}
               <small>
                 {room
-                  ? connection
+                  ? `${room.state.clock ? `${TIME_CONTROLS[room.state.clock.control].label} · ` : ""}${connection}`
                   : playMode === "ai"
                     ? `${DIFFICULTY_PRESETS[aiDifficulty].label} · You play ${aiColor === "w" ? "White" : "Black"}`
                     : "Both colors · one controller"}
@@ -751,6 +937,7 @@ export default function AirChess() {
             lastMove={lastMove}
             room={room}
             state={state}
+            clocks={clocks}
             busy={busy}
             aiConfig={{
               active: playMode === "ai",
@@ -823,6 +1010,8 @@ export default function AirChess() {
           room={room}
           playMode={playMode}
           onPlayModeChange={changePlayMode}
+          timeControl={timeControl}
+          onTimeControlChange={changeTimeControl}
           aiDifficulty={aiDifficulty}
           onAiDifficultyChange={changeAiDifficulty}
           aiColor={aiColor}
@@ -841,11 +1030,15 @@ export default function AirChess() {
           busy={busy}
           hydrated={hydrated}
           copied={copied}
+          watchCopied={watchCopied}
+          connection={connection}
           muted={muted}
           onToggleMuted={toggleMuted}
           onConnectCreate={() => void connect("create")}
           onOpenJoin={() => setModal("join")}
           onCopyInvite={() => void copyInvite()}
+          onCopyWatchLink={() => void copyWatchLink()}
+          onLeaveWatch={leave}
           onOpenModal={(nextModal) => setModal(nextModal)}
           onDownloadPgn={downloadPgn}
         />
@@ -977,7 +1170,7 @@ export default function AirChess() {
         onAction={(action) => void act(action)}
         onLeaveRoom={leave}
         onResetPractice={() => {
-          setLocal(newGame(local.game + 1));
+          setLocal(newGame(local.game + 1, timeControl));
           setSelected(null);
           setViewPly(null);
           setModal(null);
