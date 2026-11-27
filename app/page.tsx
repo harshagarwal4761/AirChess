@@ -2,14 +2,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { Color, Square } from "chess.js";
-import { ArrowUpRight, CircleHelp, ScanLine, Settings2, ShieldCheck, X } from "lucide-react";
+import { ArrowUpRight, CircleHelp, ScanLine, Settings2, ShieldCheck, User, X } from "lucide-react";
 import { ChessBoard } from "../components/chess-board";
 import { GameModals, type ModalKind } from "../components/game-modals";
+import type { ArchivedGame } from "../components/profile-modal";
 import { SidebarPanels } from "../components/sidebar-panels";
 import { useHandTracking, type AirEvent } from "../hooks/use-hand-tracking";
 import { useStockfish } from "../hooks/use-stockfish";
 import { practiceOrientation } from "../lib/air-controls";
 import type { AimMode } from "../lib/air-pointer";
+import type { PublicUser } from "../lib/auth";
 import {
   applyAction,
   effectiveClocks,
@@ -40,6 +42,8 @@ type Room = {
   ready: boolean;
   revision: number;
   state: RoomState;
+  whiteName?: string | null;
+  blackName?: string | null;
   spectating?: boolean;
   serverNow?: number;
 };
@@ -102,6 +106,7 @@ export default function AirChess() {
   const [viewPly, setViewPly] = useState<number | null>(null);
   const [clockOffset, setClockOffset] = useState(0);
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [user, setUser] = useState<PublicUser | null>(null);
 
   const keyRef = useRef("");
   const roomRef = useRef<Room | null>(null);
@@ -109,6 +114,8 @@ export default function AirChess() {
   const audioRef = useRef<AudioContext | null>(null);
   const practiceLoadedRef = useRef(false);
   const flaggedRevRef = useRef<number | null>(null);
+  const archivedLocalGameRef = useRef<number | null>(null);
+  const skipViewResetRef = useRef(false);
 
   useEffect(() => {
     roomRef.current = room;
@@ -370,6 +377,11 @@ export default function AirChess() {
     const params = new URLSearchParams(location.search);
     const invite = params.get("room");
     const watch = params.get("watch") === "1";
+    const replayId = params.get("game");
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? (r.json() as Promise<{ user?: PublicUser | null }>) : { user: null }))
+      .then((d) => setUser(d.user ?? null))
+      .catch(() => {});
     queueMicrotask(() => {
       setFocusMode(prefs.focusMode);
       setOpacity(prefs.opacity);
@@ -386,7 +398,30 @@ export default function AirChess() {
       setTwoHandPause(prefs.twoHandPause);
       setLocal(savedPractice);
       practiceLoadedRef.current = true;
-      if (invite && /^\d{6}$/.test(invite) && watch) {
+      if (replayId && /^[a-f0-9-]{36}$/.test(replayId)) {
+        fetch(`/api/games/${replayId}`)
+          .then((r) =>
+            r.ok
+              ? (r.json() as Promise<{ game: ArchivedGame }>)
+              : Promise.reject(new Error("Game not found.")),
+          )
+          .then((data) => {
+            const g = data.game;
+            skipViewResetRef.current = true;
+            setPlayMode("practice");
+            setLocal({
+              moves: g.moves,
+              result: { text: g.resultText, winner: (g.winner as Color | null) ?? null },
+              drawOffer: null,
+              rematch: null,
+              game: 1,
+              clock: null,
+            });
+            setViewPly(0);
+            setNotice(`Loaded archived game: ${g.whiteName} vs ${g.blackName}`);
+          })
+          .catch((e) => setNotice(e instanceof Error ? e.message : "Could not load game."));
+      } else if (invite && /^\d{6}$/.test(invite) && watch) {
         setConnection("Connecting to stream…");
         api(`/${invite}?watch=1`)
           .then((r) => acceptRoom(r, "Live watch"))
@@ -418,6 +453,42 @@ export default function AirChess() {
     if (!practiceLoadedRef.current) return;
     writePracticeState(local);
   }, [local]);
+
+  useEffect(() => {
+    if (!user || room || playMode !== "ai" || !local.result || !local.moves.length) return;
+    if (archivedLocalGameRef.current === local.game) return;
+    archivedLocalGameRef.current = local.game;
+    void fetch("/api/games", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "ai",
+        playerColor: aiColor,
+        difficulty: aiDifficulty,
+        timeControl: local.clock?.control ?? "untimed",
+        moves: local.moves,
+        resultText: local.result.text,
+        winner: local.result.winner,
+      }),
+    })
+      .then(() => fetch("/api/auth/me"))
+      .then((r) => (r.ok ? (r.json() as Promise<{ user?: PublicUser | null }>) : null))
+      .then((d) => {
+        if (d?.user) setUser(d.user);
+      })
+      .catch(() => {});
+  }, [user, room, playMode, local.result, local.moves, local.game, local.clock?.control, aiColor, aiDifficulty]);
+
+  // Refresh user Elo/record whenever an online room game concludes.
+  useEffect(() => {
+    if (!user || !room?.state.result) return;
+    void fetch("/api/auth/me")
+      .then((r) => (r.ok ? (r.json() as Promise<{ user?: PublicUser | null }>) : null))
+      .then((d) => {
+        if (d?.user) setUser(d.user);
+      })
+      .catch(() => {});
+  }, [user, room?.state.result]);
 
   useEffect(() => {
     if (!room?.code) return;
@@ -534,7 +605,8 @@ export default function AirChess() {
     queueMicrotask(() => {
       setSelected(null);
       setPromotion(null);
-      setViewPly(null);
+      if (skipViewResetRef.current) skipViewResetRef.current = false;
+      else setViewPly(null);
       setHintVisible(false);
       setBestHint(null);
     });
@@ -887,6 +959,16 @@ export default function AirChess() {
           </button>
           <button
             type="button"
+            className={`text-button profile-pill ${user ? "signed-in" : ""}`}
+            data-air
+            aria-label={user ? `Profile for ${user.username}` : "Sign in or view leaderboard"}
+            onClick={() => setModal("profile")}
+          >
+            <User size={15} />
+            <span>{user ? `@${user.username} · ${user.rating}` : "Sign in"}</span>
+          </button>
+          <button
+            type="button"
             className="icon-button"
             data-air
             aria-label="Settings"
@@ -1170,10 +1252,31 @@ export default function AirChess() {
         onAction={(action) => void act(action)}
         onLeaveRoom={leave}
         onResetPractice={() => {
+          archivedLocalGameRef.current = null;
           setLocal(newGame(local.game + 1, timeControl));
           setSelected(null);
           setViewPly(null);
           setModal(null);
+        }}
+        user={user}
+        onUserChange={setUser}
+        onReplayGame={(g) => {
+          setRoom(null);
+          roomRef.current = null;
+          skipViewResetRef.current = true;
+          setPlayMode("practice");
+          safeSet("airchess.playMode", "practice");
+          setLocal({
+            moves: g.moves,
+            result: { text: g.resultText, winner: (g.winner as Color | null) ?? null },
+            drawOffer: null,
+            rematch: null,
+            game: 1,
+            clock: null,
+          });
+          setViewPly(0);
+          setModal(null);
+          setNotice(`Replaying ${g.whiteName} vs ${g.blackName}`);
         }}
       />
     </main>

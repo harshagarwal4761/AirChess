@@ -21,6 +21,8 @@ type RoomSummary = {
   color: Color | null;
   ready: boolean;
   spectating?: boolean;
+  whiteName?: string | null;
+  blackName?: string | null;
 } | null;
 
 type AiConfig = {
@@ -172,13 +174,12 @@ export function ChessBoard({
           <strong>
             {room
               ? room.spectating
-                ? color === "w"
-                  ? "White player"
-                  : "Black player"
+                ? (color === "w" ? room.whiteName : room.blackName) ||
+                  (color === "w" ? "White player" : "Black player")
                 : you
-                  ? "You"
+                  ? `You${(color === "w" ? room.whiteName : room.blackName) ? ` (${color === "w" ? room.whiteName : room.blackName})` : ""}`
                   : room.ready
-                    ? "Your friend"
+                    ? (color === "w" ? room.whiteName : room.blackName) || "Your friend"
                     : "An open seat"
               : isAiOpponent
                 ? `Stockfish · ${DIFFICULTY_PRESETS[aiConfig.difficulty].label}`

@@ -1,3 +1,4 @@
+import { getSessionUser } from "../../../../lib/auth";
 import {
   credential,
   readBody,
@@ -17,11 +18,13 @@ export async function GET(request: Request, context: Context) {
   });
 }
 export async function POST(request: Request, context: Context) {
-  return respond(async () =>
-    roomRequest(
+  return respond(async () => {
+    const user = await getSessionUser(request).catch(() => null);
+    return roomRequest(
       (await context.params).code,
       await credential(request),
       await readBody(request),
-    ),
-  );
+      user,
+    );
+  });
 }

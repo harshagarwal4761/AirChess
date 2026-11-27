@@ -124,5 +124,6 @@ Phase 8 checks: 36 unit tests, TypeScript validation, production build, and 12 b
 - [x] Add read-only live spectator mode (`?watch=1`) with live clocks and move stream.
 
 ## Phase 14 — full-stack auth, D1 match history, and player profiles
-- [ ] Add GitHub OAuth + guest accounts with HTTP-only sessions and expanded Drizzle/D1 schema (`users`, `games`, `ratings`).
-- [ ] Add persistent match archive, replayable game URLs, and Elo/win-loss statistics.
+- [x] Add salted PBKDF2 account auth (`register`/`login`/`logout`/`me`) with HTTP-only D1 sessions alongside guest play.
+- [x] Expand Drizzle/D1 schema (`users`, `sessions`, `games`, room player links) with automatic game archiving and Elo rating updates.
+- [x] Add player profile modal, match history archive with one-click board replay, and Elo leaderboard.

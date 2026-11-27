@@ -162,6 +162,62 @@ const chunk = new TextDecoder().decode((await reader.read()).value);
 assert.match(chunk, /event: state/);
 sseAbort.abort();
 
+// Account auth, rated room archiving, Elo update, and leaderboard.
+const suffix = Date.now().toString().slice(-6);
+const userA = `w_${suffix}`;
+const userB = `b_${suffix}`;
+const regA = await fetch(`${origin}/api/auth/register`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ username: userA, password: "secret123", displayName: "Player A" }),
+});
+assert.equal(regA.status, 200);
+const cookieA = regA.headers.get("set-cookie").split(";")[0];
+
+const regB = await fetch(`${origin}/api/auth/register`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ username: userB, password: "secret123", displayName: "Player B" }),
+});
+assert.equal(regB.status, 200);
+const cookieB = regB.headers.get("set-cookie").split(";")[0];
+
+const ratedCreate = await fetch(`${origin}/api/rooms`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${white}`, "Content-Type": "application/json", Cookie: cookieA },
+  body: JSON.stringify({ type: "create", timeControl: "blitz3_2" }),
+});
+assert.equal(ratedCreate.status, 200);
+const ratedRoom = await ratedCreate.json();
+assert.equal(ratedRoom.whiteName, `@${userA}`);
+
+const ratedJoin = await fetch(`${origin}/api/rooms/${ratedRoom.code}`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${black}`, "Content-Type": "application/json", Cookie: cookieB },
+  body: JSON.stringify({ type: "join" }),
+});
+assert.equal(ratedJoin.status, 200);
+
+const ratedResign = await fetch(`${origin}/api/rooms/${ratedRoom.code}`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${black}`, "Content-Type": "application/json", Cookie: cookieB },
+  body: JSON.stringify({ type: "action", revision: 1, action: { type: "resign" } }),
+});
+assert.equal(ratedResign.status, 200);
+
+const meA = await (await fetch(`${origin}/api/auth/me`, { headers: { Cookie: cookieA } })).json();
+const meB = await (await fetch(`${origin}/api/auth/me`, { headers: { Cookie: cookieB } })).json();
+assert.equal(meA.user.rating, 1216);
+assert.equal(meA.user.wins, 1);
+assert.equal(meB.user.rating, 1184);
+assert.equal(meB.user.losses, 1);
+
+const gamesData = await (await fetch(`${origin}/api/games`, { headers: { Cookie: cookieA } })).json();
+assert.ok(gamesData.games.some((g) => g.roomCode === ratedRoom.code));
+
+const lbData = await (await fetch(`${origin}/api/leaderboard`)).json();
+assert.ok(lbData.players.some((p) => p.username === userA && p.rating === 1216));
+
 console.log(
-  "Multiplayer integration passed: create, seats, auth, legal turns, stale/racing writes, reconnect, draw, rematch, resign, timed clocks, spectators, and SSE stream.",
+  "Multiplayer integration passed: create, seats, auth, legal turns, stale/racing writes, reconnect, draw, rematch, resign, timed clocks, spectators, SSE stream, accounts, Elo, and match archive.",
 );

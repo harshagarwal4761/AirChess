@@ -1,14 +1,25 @@
 "use client";
 import type { Color } from "chess.js";
 import { Activity, ArrowUpRight, ChevronRight, Maximize2, ScanLine, Volume2, VolumeX, X } from "lucide-react";
+import type { PublicUser } from "../lib/auth";
 import { pieceNames, type Action } from "../lib/game";
 import type { BoardTheme } from "../lib/preferences";
 import { resetPanelLayout } from "../lib/panel-layout";
 import { ChessPiece } from "./chess-pieces";
 import { DeveloperCard } from "./developer-card";
 import { MovableSurface } from "./movable-surface";
+import { ProfileModal, type ArchivedGame } from "./profile-modal";
 
-export type ModalKind = "join" | "help" | "settings" | "about" | "resign" | "leave" | "reset" | null;
+export type ModalKind =
+  | "join"
+  | "help"
+  | "settings"
+  | "about"
+  | "profile"
+  | "resign"
+  | "leave"
+  | "reset"
+  | null;
 
 type Props = {
   modal: ModalKind;
@@ -43,6 +54,9 @@ type Props = {
   onAction: (action: Action) => void;
   onLeaveRoom: () => void;
   onResetPractice: () => void;
+  user: PublicUser | null;
+  onUserChange: (user: PublicUser | null) => void;
+  onReplayGame: (game: ArchivedGame) => void;
 };
 
 const themes: { id: BoardTheme; label: string }[] = [
@@ -84,6 +98,9 @@ export function GameModals({
   onAction,
   onLeaveRoom,
   onResetPractice,
+  user,
+  onUserChange,
+  onReplayGame,
 }: Props) {
   if (!modal && !promotion) return null;
 
@@ -219,6 +236,13 @@ export function GameModals({
           </>
         ) : modal === "about" ? (
           <DeveloperCard />
+        ) : modal === "profile" ? (
+          <ProfileModal
+            user={user}
+            onUserChange={onUserChange}
+            onReplayGame={onReplayGame}
+            onNotice={onNotice}
+          />
         ) : modal === "settings" ? (
           <>
             <div className="eyebrow">MAKE IT YOUR SPACE</div>

@@ -1,7 +1,9 @@
 import type { Color } from "chess.js";
-import { eq, and, lt } from "drizzle-orm";
+import { eq, and, lt, sql } from "drizzle-orm";
 import { getDb } from "../db";
-import { rooms } from "../db/schema";
+import { games, rooms, users } from "../db/schema";
+import type { PublicUser } from "./auth";
+import { calculateElo } from "./elo";
 import {
   applyAction,
   newGame,
@@ -74,6 +76,8 @@ function view(row: typeof rooms.$inferSelect, key: string) {
     ready: Boolean(row.black),
     revision: row.revision,
     state: JSON.parse(row.state) as RoomState,
+    whiteName: row.whiteName ?? null,
+    blackName: row.blackName ?? null,
     spectating: false,
     serverNow: Date.now(),
   };
@@ -86,12 +90,18 @@ function spectatorView(row: typeof rooms.$inferSelect) {
     ready: Boolean(row.black),
     revision: row.revision,
     state: JSON.parse(row.state) as RoomState,
+    whiteName: row.whiteName ?? null,
+    blackName: row.blackName ?? null,
     spectating: true,
     serverNow: Date.now(),
   };
 }
 
-export async function createRoom(key: string, timeControl: TimeControlId = "untimed") {
+export async function createRoom(
+  key: string,
+  timeControl: TimeControlId = "untimed",
+  user: PublicUser | null = null,
+) {
   const control: TimeControlId = timeControl in TIME_CONTROLS ? timeControl : "untimed";
   const db = getDb();
   const now = Date.now();
@@ -104,6 +114,8 @@ export async function createRoom(key: string, timeControl: TimeControlId = "unti
     const row = {
       code,
       white: key,
+      whiteUserId: user?.id ?? null,
+      whiteName: user ? `@${user.username}` : null,
       state: JSON.stringify(newGame(1, control)),
       revision: 0,
       createdAt: now,
@@ -140,10 +152,74 @@ export async function getRoomRevision(code: string) {
   return row.revision;
 }
 
+async function archiveFinishedRoomGame(
+  row: typeof rooms.$inferSelect,
+  next: RoomState,
+) {
+  if (!next.result || row.archivedGame) return;
+  const db = getDb();
+  const whiteUser = row.whiteUserId
+    ? await db.select().from(users).where(eq(users.id, row.whiteUserId)).get()
+    : null;
+  const blackUser = row.blackUserId
+    ? await db.select().from(users).where(eq(users.id, row.blackUserId)).get()
+    : null;
+
+  const whiteBefore: number | null = whiteUser?.rating ?? null;
+  let whiteAfter: number | null = whiteBefore;
+  const blackBefore: number | null = blackUser?.rating ?? null;
+  let blackAfter: number | null = blackBefore;
+
+  if (whiteUser && blackUser && whiteUser.id !== blackUser.id) {
+    const elo = calculateElo(whiteUser.rating, blackUser.rating, next.result.winner);
+    whiteAfter = elo.whiteAfter;
+    blackAfter = elo.blackAfter;
+  }
+
+  const updateStats = async (user: typeof users.$inferSelect | null, side: Color, afterRating: number | null) => {
+    if (!user) return;
+    const isWin = next.result!.winner === side;
+    const isLoss = next.result!.winner !== null && next.result!.winner !== side;
+    const isDraw = next.result!.winner === null;
+    await db
+      .update(users)
+      .set({
+        rating: afterRating ?? user.rating,
+        wins: sql`${users.wins} + ${isWin ? 1 : 0}`,
+        losses: sql`${users.losses} + ${isLoss ? 1 : 0}`,
+        draws: sql`${users.draws} + ${isDraw ? 1 : 0}`,
+      })
+      .where(eq(users.id, user.id));
+  };
+
+  await updateStats(whiteUser ?? null, "w", whiteAfter);
+  await updateStats(blackUser ?? null, "b", blackAfter);
+
+  await db.insert(games).values({
+    id: crypto.randomUUID(),
+    mode: "online",
+    roomCode: row.code,
+    whiteUserId: row.whiteUserId ?? null,
+    blackUserId: row.blackUserId ?? null,
+    whiteName: row.whiteName ?? "White",
+    blackName: row.blackName ?? "Black",
+    timeControl: next.clock?.control ?? "untimed",
+    moves: JSON.stringify(next.moves),
+    resultText: next.result.text,
+    winner: next.result.winner,
+    whiteRatingBefore: whiteBefore,
+    whiteRatingAfter: whiteAfter,
+    blackRatingBefore: blackBefore,
+    blackRatingAfter: blackAfter,
+    createdAt: Date.now(),
+  });
+}
+
 export async function roomRequest(
   code: string,
   key: string,
   body?: { type?: string; revision?: number; action?: Action },
+  user: PublicUser | null = null,
 ) {
   if (!/^\d{6}$/.test(code))
     throw new RoomError("Enter a six-digit room code.");
@@ -157,7 +233,13 @@ export async function roomRequest(
       throw new RoomError("This room already has two players.", 409);
     const updated = await db
       .update(rooms)
-      .set({ black: key, revision: row.revision + 1, updatedAt: Date.now() })
+      .set({
+        black: key,
+        blackUserId: user?.id ?? null,
+        blackName: user ? `@${user.username}` : null,
+        revision: row.revision + 1,
+        updatedAt: Date.now(),
+      })
       .where(and(eq(rooms.code, code), eq(rooms.revision, row.revision)))
       .returning();
     if (!updated.length)
@@ -183,10 +265,13 @@ export async function roomRequest(
   } catch (e) {
     throw new RoomError(e instanceof Error ? e.message : "Invalid move.");
   }
+  const shouldArchive = Boolean(next.result && !row.archivedGame);
+  const nextArchived = !next.result ? 0 : row.archivedGame || (shouldArchive ? 1 : 0);
   const updated = await db
     .update(rooms)
     .set({
       state: JSON.stringify(next),
+      archivedGame: nextArchived,
       revision: row.revision + 1,
       updatedAt: Date.now(),
     })
@@ -194,6 +279,9 @@ export async function roomRequest(
     .returning();
   if (!updated.length)
     throw new RoomError("Another action arrived first. Please try again.", 409);
+  if (shouldArchive) {
+    await archiveFinishedRoomGame(row, next).catch((e) => console.error("Archive failed", e));
+  }
   notifyRoom(code);
   return view(updated[0], key);
 }
