@@ -34,6 +34,6 @@ const result = spawnSync(
     "--persist-to",
     ".wrangler/state",
   ],
-  { stdio: "inherit" },
+  { input: "y\n", stdio: ["pipe", "inherit", "inherit"] },
 );
 process.exit(result.status ?? 1);

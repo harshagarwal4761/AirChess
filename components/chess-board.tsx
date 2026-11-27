@@ -1,8 +1,15 @@
 "use client";
-import { useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import type { Chess, Color, Move, Square } from "chess.js";
 import { Download, Flag, Handshake, RotateCcw, Undo2 } from "lucide-react";
-import { formatClock, materialSummary, pieceNames, type Action, type RoomState } from "../lib/game";
+import {
+  effectiveClocks,
+  formatClock,
+  materialSummary,
+  pieceNames,
+  type Action,
+  type RoomState,
+} from "../lib/game";
 import {
   DIFFICULTY_PRESETS,
   evalWinPercent,
@@ -32,11 +39,6 @@ type AiConfig = {
   thinking: boolean;
 };
 
-type ClockView = {
-  wMs: number;
-  bMs: number;
-} | null;
-
 type Props = {
   chess: Chess;
   orientation: Color;
@@ -45,7 +47,8 @@ type Props = {
   lastMove?: Move;
   room: RoomSummary;
   state: RoomState;
-  clocks: ClockView;
+  clockOffset?: number;
+  liveTurn?: Color;
   busy: boolean;
   aiConfig: AiConfig;
   arranging: boolean;
@@ -71,7 +74,42 @@ type Props = {
   onAction: (action: Action) => void;
 };
 
-export function ChessBoard({
+function MatchClock({
+  state,
+  color,
+  turn,
+  running,
+  clockOffset,
+}: {
+  state: RoomState;
+  color: Color;
+  turn: Color;
+  running: boolean;
+  clockOffset: number;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    queueMicrotask(() => setNow(Date.now()));
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 100);
+    return () => clearInterval(id);
+  }, [running, state.clock]);
+
+  const view = effectiveClocks(state, turn, now + clockOffset);
+  if (!view) return null;
+  const ms = color === "w" ? view.wMs : view.bMs;
+  const lowTime = ms > 0 && ms < 20_000;
+  return (
+    <span
+      className={`clock-chip ${running ? "clock-active" : ""} ${lowTime ? "clock-low" : ""}`}
+      aria-label={`${color === "w" ? "White" : "Black"} clock ${formatClock(ms)}`}
+    >
+      {formatClock(ms)}
+    </span>
+  );
+}
+
+export const ChessBoard = memo(function ChessBoard({
   chess,
   orientation,
   selected,
@@ -79,7 +117,8 @@ export function ChessBoard({
   lastMove,
   room,
   state,
-  clocks,
+  clockOffset = 0,
+  liveTurn,
   busy,
   aiConfig,
   arranging,
@@ -160,9 +199,8 @@ export function ChessBoard({
     const isHumanVsAi = !room && aiConfig.active && aiConfig.playerColor === color;
     const capturedList = color === "w" ? material.whiteCaptured : material.blackCaptured;
     const advantage = color === "w" ? material.whiteAdvantage : material.blackAdvantage;
-    const ms = clocks ? (color === "w" ? clocks.wMs : clocks.bMs) : null;
-    const activeTurn = chess.turn() === color && !hasResult && (!room || room.ready);
-    const lowTime = ms !== null && ms > 0 && ms < 20_000;
+    const turn = liveTurn ?? chess.turn();
+    const activeTurn = turn === color && !hasResult && (!room || room.ready);
     return (
       <div
         className={`player-bar ${chess.turn() === color && !hasResult ? "active-player" : ""}`}
@@ -204,13 +242,14 @@ export function ChessBoard({
             {advantage > 0 && <span className="material-chip">+{advantage}</span>}
           </span>
         </div>
-        {ms !== null ? (
-          <span
-            className={`clock-chip ${activeTurn ? "clock-active" : ""} ${lowTime ? "clock-low" : ""}`}
-            aria-label={`${color === "w" ? "White" : "Black"} clock ${formatClock(ms)}`}
-          >
-            {formatClock(ms)}
-          </span>
+        {state.clock ? (
+          <MatchClock
+            state={state}
+            color={color}
+            turn={turn}
+            running={activeTurn}
+            clockOffset={clockOffset}
+          />
         ) : (
           <span className="turn-chip">
             {hasResult
@@ -389,4 +428,4 @@ export function ChessBoard({
       </div>
     </MovableSurface>
   );
-}
+});

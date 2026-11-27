@@ -1,8 +1,11 @@
 "use client";
+import { useState } from "react";
 import type { Color } from "chess.js";
-import { Activity, ArrowUpRight, ChevronRight, Maximize2, ScanLine, Volume2, VolumeX, X } from "lucide-react";
+import { Activity, ArrowUpRight, ChevronRight, Database, Download, Maximize2, ScanLine, Volume2, VolumeX, X } from "lucide-react";
 import type { PublicUser } from "../lib/auth";
 import { pieceNames, type Action } from "../lib/game";
+import type { RecordedGestureSample } from "../lib/gesture-classifier";
+import type { GestureLabel } from "../lib/gesture-features";
 import type { BoardTheme } from "../lib/preferences";
 import { resetPanelLayout } from "../lib/panel-layout";
 import { ChessPiece } from "./chess-pieces";
@@ -57,6 +60,7 @@ type Props = {
   user: PublicUser | null;
   onUserChange: (user: PublicUser | null) => void;
   onReplayGame: (game: ArchivedGame) => void;
+  onCaptureSample?: (label: GestureLabel) => RecordedGestureSample | null;
 };
 
 const themes: { id: BoardTheme; label: string }[] = [
@@ -101,8 +105,37 @@ export function GameModals({
   user,
   onUserChange,
   onReplayGame,
+  onCaptureSample,
 }: Props) {
+  const [sampleLabel, setSampleLabel] = useState<GestureLabel>("pinch");
+  const [samples, setSamples] = useState<RecordedGestureSample[]>([]);
+
   if (!modal && !promotion) return null;
+
+  function captureGesture() {
+    const sample = onCaptureSample?.(sampleLabel);
+    if (!sample) {
+      onNotice("Show one clear hand in front of the camera to capture a sample.");
+      return;
+    }
+    setSamples((prev) => [...prev, sample]);
+    onNotice(`Captured "${sampleLabel}" gesture sample.`);
+  }
+
+  function downloadSamples() {
+    if (samples.length === 0) return;
+    const blob = new Blob([JSON.stringify({ version: 1, samples }, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `airchess-gestures-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   return (
     <div
@@ -226,8 +259,17 @@ export function GameModals({
               Double pinch is also available in the Air controls panel: close/open twice on the
               piece, then twice on its destination. Your control hand plays both colors in local
               practice, which follows the active side by default. Reach assist brings far squares
-              within a smaller hand movement. In a room, each laptop controls its own color. Casual
-              games are untimed; repetition and fifty-move draws are automatic.
+              within a smaller hand movement. In a room, each laptop controls its own color.
+            </div>
+            <div className="shortcut-grid" aria-label="Keyboard shortcuts">
+              <div><kbd>←</kbd><kbd>→</kbd> Step moves</div>
+              <div><kbd>Home</kbd><kbd>End</kbd> Start / live</div>
+              <div><kbd>F</kbd> Flip board</div>
+              <div><kbd>Z</kbd> / <kbd>U</kbd> Undo move</div>
+              <div><kbd>E</kbd> Toggle eval bar</div>
+              <div><kbd>H</kbd> Best move hint</div>
+              <div><kbd>M</kbd> Mute sounds</div>
+              <div><kbd>?</kbd> Keyboard help</div>
             </div>
             <button type="button" className="button primary full" data-air onClick={onClose}>
               Let’s play
@@ -370,6 +412,55 @@ export function GameModals({
               <Maximize2 size={17} />
               Toggle fullscreen
             </button>
+            <div className="sample-recorder">
+              <div className="sample-recorder-head">
+                <span>
+                  <Database size={14} /> Gesture dataset recorder
+                </span>
+                <span>{samples.length} captured</span>
+              </div>
+              <div className="ai-row" role="group" aria-label="Gesture label">
+                {(["open", "pinch", "fist"] as GestureLabel[]).map((label) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className={`mini-chip ${sampleLabel === label ? "active" : ""}`}
+                    aria-pressed={sampleLabel === label}
+                    onClick={() => setSampleLabel(label)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={!cameraActive || !onCaptureSample}
+                  onClick={captureGesture}
+                >
+                  Capture sample
+                </button>
+                <button
+                  type="button"
+                  className="button subtle"
+                  disabled={samples.length === 0}
+                  onClick={downloadSamples}
+                >
+                  <Download size={14} />
+                  Export JSON
+                </button>
+                {samples.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setSamples([])}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
             <p className="small-note">
               Camera frames are processed on this device. Only room actions and chess moves are
               sent to the game server.

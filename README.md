@@ -1,12 +1,12 @@
 # AirChess
 
-**Your next move. In the air.** A webcam chess app with steady-hover and double-pinch controls, a translucent camera overlay, and online rooms for two players.
+**Your next move. In the air.** A full-stack chess web application featuring hands-free webcam gesture controls, a local Stockfish WebAssembly opponent, and real-time online rooms with blitz clocks, spectators, accounts, and Elo ratings.
 
-This is a computer-vision application, not a physical hologram. You look at the screen and move your hand in front of the webcam. MediaPipe's pretrained model runs locally in the browser; your camera frames are never uploaded by AirChess.
+This is a computer-vision web application, not a physical hologram. You move your hand in front of your webcam; MediaPipe's pretrained hand-landmarker extracts 21 keypoints locally in a Web Worker, a lightweight gesture pipeline drives cursor smoothing and piece selection, and camera frames never leave your device.
 
 ## Start here
 
-You do **not** need to know ML to use this. You can learn the application one layer at a time. Start with [the beginner guide](docs/LEARNING.md), then [architecture](docs/ARCHITECTURE.md).
+You can learn the application one layer at a time starting with [the beginner guide](docs/LEARNING.md) and [architecture](docs/ARCHITECTURE.md).
 
 ### Clone and run
 
@@ -16,95 +16,67 @@ Install Node.js 22.13 or newer, then run:
 git clone https://github.com/harshagarwal4761/AirChess.git
 cd AirChess
 npm ci
-npm run build
 npm run db:setup
 npm run dev
 ```
 
-If the repository is private, sign in to GitHub with an account that has access before cloning. Open the address printed by the terminal, normally **http://127.0.0.1:5173**. Keep that terminal running.
-
-For an existing checkout with dependencies and the database prepared, run `npm run dev` from the project folder.
-
-`db:setup` creates the local database using the generated migrations and records which migrations have run. It is safe to repeat. Local and hosted databases are separate.
+Open the address printed by the terminal, normally **http://127.0.0.1:5173**. `db:setup` applies D1 migrations cleanly (safe to repeat; local and hosted databases are separate).
 
 ### Play
 
-1. Try a few moves by clicking a piece and a highlighted destination.
-2. Click **Enable air controls**, then allow camera access. Use a regular desktop browser if the embedded preview cannot open your camera.
-3. Show only your chosen control hand with your thumb and index apart until calibrated. In **Steady hover** mode, point at a piece and hold the cursor in its square for 1.1 seconds until the ring fills. Move to a highlighted destination and hold again. Moving away cancels the countdown.
-4. Optional: raise your second open palm to pause all gesture input. Lower it to resume. The selected piece is kept. **Double pinch** remains available in the Air controls panel: close/open twice on the piece, then twice on its destination.
-5. Hold an open fingertip over a button for 1.3 seconds to activate it. A border shows the dwell timer. Move away before activating that button again.
-6. Create a room and share its link or six-digit code. Your friend joins from their laptop and plays Black. Their camera is independent of yours.
+1. Choose **Pass & play**, **vs Stockfish**, or **Online** in the Game mode card, or make moves directly by mouse, keyboard shortcuts (`?` to view), or webcam.
+2. Click **Enable air controls**, then allow camera access. Use a regular desktop browser if an embedded preview restricts webcam permissions.
+3. Show your control hand with thumb and index apart until calibrated. In **Steady hover** mode, point at a piece and hold inside its square for 1.1 seconds until the ring fills, then hold on a highlighted destination. Hold a **fist** briefly to cancel your selection.
+4. Optional: switch to **Double pinch** in the Air controls panel, or enable two-hand palm pause in Settings (single-hand tracking defaults on for higher frame rates on integrated GPUs).
+5. Create an **Online** room (untimed, `3+2`, `5+0`, or `10+0`) and share the invite link (`/?room=CODE`) or spectator link (`/?room=CODE&watch=1`). Optionally sign in to archive games, earn Elo in rated rooms, replay matches (`/?game=<id>`), and appear on the leaderboard.
 
-The first camera permission prompt needs a click. The model/wasm download is about 19 MB on first use; it is served by the app. Tracking runs in a background Web Worker, processing fresh camera frames as soon as the model is free. It requests up to 60 camera FPS and falls back from GPU to CPU if necessary. Actual performance depends on your device.
+The first camera activation loads ~19 MB of local MediaPipe model/WASM assets served by the app. Inference runs in a dedicated Web Worker using `requestVideoFrameCallback` (with `requestAnimationFrame` fallback) and skips frames while busy instead of queuing, falling back between GPU and CPU delegates automatically.
 
-**A localhost link only works on the computer running the server.** To play from different laptops, both players need access to the same HTTPS deployment. Do not send your friend `127.0.0.1`. Ordinary unencrypted LAN URLs generally cannot access the webcam. The hosted AirChess site is configured for anyone with its link. Both players open https://airchess-gesture-play.richroot2.chatgpt.site/ ; one chooses Create room and the other chooses Join room and enters the six-digit code. GitHub stores the source; it does not run the multiplayer server. Each player enables their own camera.
+**A localhost link only works on your own machine.** To play across separate laptops, both players must open the same HTTPS deployment. GitHub stores the source code; it does not run the backend server.
 
 ## Included
 
-- Local practice playing both sides with your calibrated control hand; the active color rotates toward you by default. No computer opponent yet.
-- Server-validated multiplayer rooms, separate White/Black seats, refresh recovery in the same browser tab.
-- Castling, en passant, four promotion choices, check/checkmate, stalemate, insufficient-material draws.
-- Automatic threefold-repetition and fifty-move draws (a casual-play convention, not a full tournament claim procedure).
-- Draw offers, resignation, mutual rematches, PGN export, move history, capture indicators.
-- Mirrored live camera background, landmark skeleton, smoothed pointer, pinch hysteresis, tracking-loss cancellation.
-- Gesture menus/keypad, mouse and keyboard fallback, a saved 0–100% transparency slider and gesture adjustment buttons, optional move sounds.
-
-Games are untimed. A room expires after seven days without a room-changing action. The room code invites a second player; it is not a login password. Your unguessable player key is stored in this tab's session storage. Refresh preserves it; closing the tab/browser may lose it. There is no account-based recovery yet. Keep the room code before leaving if you intend to rejoin in the same tab.
+- **Three game modes:** Local pass-and-play (with local undo and optional clocks), **vs Stockfish WASM** (`Casual`, `Club`, `Master` presets with local UCI evaluation bar & best-move hints), and **Online rooms** (live SSE updates with polling fallback + read-only spectators).
+- **Complete chess rules & analysis:** Castling, en passant, 4-piece promotion modal, automatic checkmate/stalemate/insufficient-material/threefold-repetition/fifty-move draws, live ECO opening detection, interactive move-history scrubbing with auto-scroll, capture/material advantage summary, PGN download, and one-click Copy FEN/PGN.
+- **Blitz & rapid clocks:** Server-synced clocks (`3+2`, `5+0`, `10+0`) with increment application, timeout adjudication (`flag` + bare-king draw check), and isolated 100 ms UI updates.
+- **Accounts & archives:** Optional guest play alongside salted PBKDF2-SHA256 accounts (`register`/`login`/`logout`/`me`), HTTP-only D1 session cookies, automatic D1 game archiving, K=32 Elo updates, shareable replay URLs, and top-player leaderboard.
+- **Custom gesture layer:** Pretrained MediaPipe 21-landmark detection combined with adaptive One-Euro smoothing, geometric pinch hysteresis, a custom 2-layer MLP gesture classifier (`open`, `pinch`, `fist`, `peace`) trained on synthesized palm-basis poses (`npm run train:gestures`), and an optional Settings gesture sample recorder/exporter.
+- **Custom themes & modular UI:** SVG Staunton pieces across three board themes (`Emerald`, `Slate`, `Walnut`), continuous `0–100%` board transparency over live camera video, synthesized Web Audio sounds, draggable/nudgeable floating panels (`MovableSurface`), keyboard shortcuts, and custom error/404 pages.
 
 ## Verify
 
 ```bash
-npm test
-npm run typecheck
-npm run build
-# With the local app running and DB initialized:
-node tests/multiplayer.integration.mjs
+npm run check          # lint + typecheck + unit tests + production build
+npm run db:setup       # initialize/migrate local Cloudflare D1 SQLite database
+# With `npm run dev` running against local D1:
+AIRCHESS_TEST_URL=http://127.0.0.1:5173 npm run test:integration
 ```
 
-See [TESTING.md](docs/TESTING.md) for the tested cases and the remaining real-camera checks. See [PLAN.md](PLAN.md) for the phased implementation record.
+See [TESTING.md](docs/TESTING.md) for automated vs. physical-camera test scope and [PLAN.md](PLAN.md) for the full phased build record.
 
 ## Project map
 
 | File | What it does |
 | --- | --- |
-| `app/page.tsx` | Board, room interface, dialogs, game controls |
-| `app/globals.css` | Visual design and responsive camera layout |
-| `hooks/use-hand-tracking.ts` | Webcam and MediaPipe lifecycle, cursor, dwell activation |
-| `workers/hand-tracking.worker.ts` | Off-thread model loading and landmark inference |
-| `lib/double-pinch.ts` | Stable target locking, double-pinch confirmation, role guards |
-| `lib/gestures.ts` | Pinch state machine and camera-to-screen mapping |
-| `lib/game.ts` | Chess replay, results, moves, draw/rematch rules |
-| `lib/room-service.ts` | Seat authentication, room storage, atomic updates |
-| `app/api/rooms/` | HTTP endpoints used by both players |
-| `db/schema.ts`, `drizzle/` | Database structure and migrations |
-| `tests/` | Rules, gesture, and multiplayer checks |
-| `build/`, `.openai/` | Sites hosting integration inherited from the starter |
+| `app/page.tsx` | Top-level board coordination, SSE sync, keyboard shortcuts, AI & camera hooks |
+| `app/api/rooms/`, `app/api/auth/`, `app/api/games/`, `app/api/health/` | Server-authoritative room actions, SSE stream, auth sessions, archive/leaderboard, D1 health |
+| `components/` | Modular UI: `chess-board.tsx` (`MatchClock`), `sidebar-panels.tsx`, `game-modals.tsx`, `profile-modal.tsx`, `movable-surface.tsx`, `chess-pieces.tsx` |
+| `hooks/use-hand-tracking.ts`, `hooks/use-stockfish.ts` | Webcam/MediaPipe worker lifecycle & Stockfish WASM worker lifecycle |
+| `lib/` | Pure logic: `game.ts`, `room-service.ts`, `auth.ts`, `elo.ts`, `rate-limit.ts`, `openings.ts`, `air-pointer.ts`, `gestures.ts`, `double-pinch.ts`, `gesture-features.ts`, `gesture-classifier.ts`, `stockfish.ts` |
+| `workers/` | Dedicated Web Workers bundled for MediaPipe (`hand-tracking.worker.ts`) and Stockfish (`stockfish.worker.ts`) |
+| `db/schema.ts`, `drizzle/` | Drizzle SQLite schema (`users`, `sessions`, `rooms`, `games`) and D1 migrations |
+| `scripts/` | Worker builds, local D1 migration runner, synthetic gesture classifier trainer, QA build helpers |
+| `tests/` | Unit tests (`npm test`) and live HTTP+D1 integration suite (`npm run test:integration`) |
 
-## Portfolio
+## Portfolio honesty
 
-Describe this as **a gesture-controlled multiplayer chess application using a pretrained hand-tracking model**. Do not claim you trained the landmark model, wrote the chess engine, or validated accuracy across users. [PORTFOLIO.md](docs/PORTFOLIO.md) gives a demo script, architecture explanation, and a practical learning path.
+Describe AirChess accurately: MediaPipe supplies the **pretrained 21-point hand landmark model**, and `chess.js` / `stockfish.js` supply the **chess legality and WASM engine**. On top of those, the application implements server-authoritative room/clock synchronization, PBKDF2 authentication + Elo archiving, real-time SSE streaming, adaptive One-Euro cursor filtering, square-border hysteresis, and a small custom 2-layer MLP gesture classifier trained on 520 synthesized palm-basis poses. Always test real webcam comfort and accuracy yourself before quoting live gesture accuracy numbers.
 
-Built with React, TypeScript, Vinext/Vite, Cloudflare D1, chess.js, and MediaPipe. See [THIRD_PARTY.md](docs/THIRD_PARTY.md) for sources. The project is a portfolio prototype, not a hardened public chess service: before opening anonymous access widely, add per-client rate limits, room cleanup, stronger seat recovery, observability, and device testing.
-
-### Aiming, selection, and the second hand
-One calibrated hand controls moves and menus. Its index cursor follows continuously, even if the thumb is curled. The cursor is mapped to the actual mirrored video rectangle, with time-based smoothing. Expanded reach is off by default because it intentionally offsets the cursor from the visible fingertip.
-
-Steady hover is the default: remain inside an eligible square for 1.1 seconds to confirm. A ring and progress bar show the countdown. Leaving the square resets it. The activated square stays latched until you leave, preventing repeated selection. Tracking loss resets the countdown without dropping the selected chess piece. Only current-turn pieces and legal destinations can be confirmed.
-
-Double pinch is optional. Aim inside the central 88% of a square for 160 ms before two complete close/open cycles. The pre-pinch square locks while the cursor continues following your finger. Complete both cycles within 3.5 seconds; holding a pinch longer than 1.5 seconds or moving the palm too far cancels. Watch the highlighted coordinate and confirmation count.
-
-The second open palm pauses gesture input immediately and resumes 350 ms after it is lowered. Use **Settings → Choose control hand again** to switch the controller. Local practice lets the same control hand play both colors. Saved board transparency remains available.
-
-Synthetic integration tests exercise the actual React page and hook, but cannot establish webcam accuracy across users. No claim of zero incorrect selections is made.
+See [PORTFOLIO.md](docs/PORTFOLIO.md) for a 90-second demo script and architecture Q&A.
 
 ### Move the board and panels
-Use **Arrange layout** in the top bar. Drag a panel by its labeled handle, or hover over its arrow buttons to nudge it in the air. A focused handle also responds to arrow keys (8px), or Shift+arrow (32px). Click **Done arranging** to resume chess selection. Panels may overlap; the one being moved comes to the front.
-
-The board, Air controls, Friendly match, and Move history panels save their offsets in this browser. Dialogs have their own always-visible move handles. **Reset layout** (or **Settings → Reset panel positions**) restores the default positions. Screen-edge limits keep handles reachable after resizing.
-
-The tracking readout shows processed FPS and average capture-to-result delay in milliseconds. The previous artificial 20 FPS cap has been removed; actual FPS is limited by the camera, model, GPU/CPU, and browser. Camera resolution, model, confidence thresholds, smoothing, hover duration, and pinch safeguards are retained. Nearly opaque panel blur is disabled over live video to reduce GPU work.
+Use **Arrange layout** in the top bar. Drag a panel by its labeled handle, or hover over its arrow buttons to nudge it in the air. A focused handle also responds to arrow keys (8px), or Shift+arrow (32px). Click **Done arranging** to resume chess selection. **Reset layout** (or **Settings → Reset panel positions**) restores default positions cleanly within the viewport.
 
 ## Developer signature
 
-AirChess is a project by **Harsh Agarwal** ([GitHub](https://github.com/harshagarwal4761)). Open the **HA / by Harsh** button in the header to see the creator card. The knight hides a small Easter egg: activate it three times. The card supports keyboard and air-button controls, and respects reduced-motion preferences. Black pieces use a contrasting outline for visibility over a transparent board.
+AirChess is a project by **Harsh Agarwal** ([GitHub](https://github.com/harshagarwal4761)). Open the **HA / by Harsh** button in the header to see the creator card. The knight hides a small Easter egg: activate it three times.

@@ -2,7 +2,7 @@ import { desc, eq, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { games, users } from "../../../db/schema";
 import { getSessionUser } from "../../../lib/auth";
-import { replay, TIME_CONTROLS, type TimeControlId } from "../../../lib/game";
+import { outcome, replay, TIME_CONTROLS, type TimeControlId } from "../../../lib/game";
 import { readBody, respond, RoomError } from "../../../lib/room-service";
 
 export const dynamic = "force-dynamic";
@@ -57,17 +57,29 @@ export async function POST(request: Request) {
     if (!Array.isArray(body.moves) || body.moves.length === 0) {
       throw new RoomError("Game has no moves to save.");
     }
+    if (body.moves.length > 500) {
+      throw new RoomError("Move list exceeds maximum length.");
+    }
+    let chess;
     try {
-      replay(body.moves);
+      chess = replay(body.moves);
     } catch {
       throw new RoomError("Invalid move list.");
     }
+    const natural = outcome(chess);
     const playerColor = body.playerColor === "b" ? "b" : "w";
     const diff =
       body.difficulty === "casual" || body.difficulty === "master" ? body.difficulty : "club";
     const aiLabel = `Stockfish (${diff[0].toUpperCase()}${diff.slice(1)})`;
     const tc = body.timeControl && body.timeControl in TIME_CONTROLS ? body.timeControl : "untimed";
-    const winner = body.winner === "w" || body.winner === "b" ? body.winner : null;
+    const winner = natural
+      ? natural.winner
+      : body.winner === "w" || body.winner === "b"
+        ? body.winner
+        : null;
+    const resultText = natural
+      ? natural.text
+      : String(body.resultText ?? "Finished").slice(0, 80);
     const isWin = winner === playerColor;
     const isLoss = winner !== null && winner !== playerColor;
     const isDraw = winner === null;
@@ -84,7 +96,7 @@ export async function POST(request: Request) {
       blackName: playerColor === "b" ? `@${user.username}` : aiLabel,
       timeControl: tc,
       moves: JSON.stringify(body.moves),
-      resultText: String(body.resultText ?? "Finished").slice(0, 80),
+      resultText,
       winner,
       whiteRatingBefore: null,
       whiteRatingAfter: null,

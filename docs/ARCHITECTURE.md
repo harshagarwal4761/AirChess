@@ -2,57 +2,37 @@
 
 ```mermaid
 flowchart LR
-  Camera[Local webcam] --> Model[MediaPipe: 21 hand landmarks]
-  Model --> Gesture[Smoothing + pinch state machine]
-  Gesture --> UI[React board and menus]
-  Mouse[Mouse / keyboard] --> UI
-  UI --> API[Room API: authenticate + validate]
-  API --> Rules[chess.js replay and legality]
-  API --> DB[(Cloudflare D1)]
-  DB --> Poll[Other player's periodic refresh]
-  Poll --> Other[Other player's React board]
+  Camera[Local webcam] --> Worker[MediaPipe Worker: 21 keypoints]
+  Worker --> Filter[1-Euro Filter + MLP Classifier + Pinch FSM]
+  Filter --> UI[React Board, Clock & Menus]
+  Mouse[Mouse / Keyboard / Stockfish WASM] --> UI
+  UI --> API[API Routes: Rate Limit, Auth & Chess Validation]
+  API --> Rules[chess.js Replay & Clock Adjudication]
+  API --> DB[(Cloudflare D1: Users, Sessions, Rooms, Games)]
+  API --> SSE[SSE Push / Polling Fallback]
+  SSE --> Other[Opponent & Spectator Boards]
 ```
 
-## Camera and gestures
+## Camera, gestures, and AI workers
 
-`use-hand-tracking.ts` acquires video without audio and sends at most one frame at a time to a local Web Worker. Camera-frame callbacks replace the prior 20 FPS throttle, with a requestAnimationFrame fallback. Busy frames are skipped instead of queued. Local MediaPipe model/WASM files detect up to two hands. Camera images never go to an AirChess endpoint. GPU inference falls back to CPU when unavailable. `scripts/build-hand-worker.mjs` bundles a classic worker for both dev and production because MediaPipe's WASM loader uses `importScripts`.
+- **Hand tracking (`hooks/use-hand-tracking.ts`, `workers/hand-tracking.worker.ts`)**: Captures webcam video without audio (`requestVideoFrameCallback` + stalled-frame watchdog fallback) and transfers at most one bitmap at a time (`inFlight` backpressure) to a classic Web Worker bundled via `scripts/build-hand-worker.mjs`. MediaPipe runs locally with GPU/CPU fallback and defaults to single-hand tracking (`numHands: 1`) unless two-hand palm pause is enabled. Camera frames never leave the browser.
+- **Cursor smoothing (`lib/air-pointer.ts`, `lib/gestures.ts`, `lib/double-pinch.ts`)**: Projects mirrored coordinates into the true rendered video rectangle (`object-fit: cover` crop + scrollbar width), applies adaptive **One-Euro (`1€`) filtering** (`beta = 0.02`, `minCutoff = 1.6`), tolerates brief 1–2 frame tracking dropouts without clearing selections, and supports both `1.1s` Steady Hover (inside the central 88% of eligible squares) and locked-target Double Pinch.
+- **Custom gesture MLP (`lib/gesture-features.ts`, `lib/gesture-classifier.ts`, `scripts/train-gesture-classifier.ts`)**: Extracts 26 palm-basis invariant geometric features from the 21 keypoints and runs a tiny trained 2-layer MLP (`26 → 24 ReLU → 4 Softmax`, `open` / `pinch` / `fist` / `peace`) with temporal probability smoothing (`GestureSmoother`), driving live confidence badges, pinch fusion, and a 450 ms **fist-hold cancel** gesture. Settings also includes a landmark sample recorder/JSON exporter (`captureSample`).
+- **Local Stockfish engine (`hooks/use-stockfish.ts`, `workers/stockfish.worker.ts`)**: Runs `stockfish.js` (WASM/asm.js) in a dedicated Web Worker with `Casual` / `Club` / `Master` difficulty presets, evaluation normalization, and post-game or solo best-move hints (disabled during active multiplayer matches).
 
-Calibration requires a single detected hand with thumb/index apart for 300 ms. Its handedness becomes the control role. The second open palm pauses input immediately, preserving any selected chess piece. It must be lowered for 350 ms before resuming. Missing or ambiguous controller labels reset pending confirmation, without dropping the selected piece. Handedness prediction can still be wrong under occlusion.
+## Game state, clocks, and openings
 
-`lib/air-pointer.ts` maps landmarks into the video's actual bounding rectangle, accounting for mirroring, crop, and scrollbar width. Optional expanded reach defaults off. Time-based smoothing follows large movements quickly and softens small tremors. Cursor movement is never gated by thumb distance; this fixes the prior freeze for a naturally curled thumb.
+`RoomState` retains full SAN move history, game result, draw offers, rematch flags, game counter, and `ClockState` (`wMs`, `bMs`, `incrementMs`, `lastTickAt`). Keeping full SAN history enables `chess.js` repetition and fifty-move adjudication as well as client-side ECO opening classification (`lib/openings.ts`).
 
-The default steady-hover mode requires 1.1 seconds continuously inside the central 88% of an eligible square. A visible ring and progress bar fill during this interval. Leaving, pausing, or losing the controller resets the timer. Activated squares stay latched until the pointer leaves, so source selection does not immediately toggle itself off.
+For timed games (`blitz3_2`, `blitz5_0`, `rapid10_0`), clocks derive elapsed time relative to server `lastTickAt` timestamps synced via `serverNow`. In the UI, `MatchClock` (`components/chess-board.tsx`) isolates the 100 ms countdown inside the two clock badges while `app/page.tsx` schedules a single timeout for auto-flagging—preventing 10 Hz full-board re-renders.
 
-Optional double pinch uses the existing 0.38/0.65 thresholds and 90 ms debounce. The pre-pinch target settles for 160 ms; two complete close/open cycles confirm it within 3.5 seconds. Target locking is separate from pointer rendering: a curling fingertip cannot change a locked target. A held pinch over 1.5 seconds or palm drift beyond max(24px, 65% of a square) cancels the sequence. Buttons keep a 1.3-second dwell. The selected piece survives detection dropouts, but unfinished input never commits after a dropout.
+## Multiplayer, SSE streaming, and accounts
 
-Both interaction modes call the actual page's `squareClick` function. Turn, selection, orientation, modal, game, or mode changes reset incomplete input. The integration harness in `tests/browser/gesture-qa.tsx` mounts that same page and hook with synthetic camera/model input; no test control is included in the production route.
+- **Room API & concurrency (`lib/room-service.ts`, `app/api/rooms/`)**: Uses per-tab random bearer keys hashed with SHA-256 and compare-and-swap SQLite updates (`WHERE code = ? AND revision = ?`) to guarantee atomic White/Black seat joins, legal turns, and timeout flags. Expired rooms (older than 7 days) are cleaned up opportunistically.
+- **Real-time delivery (`app/api/rooms/[code]/events/route.ts`)**: Streams `Server-Sent Events` combining instant in-isolate pub/sub wakeups with single-query `readRoomIfNewer` D1 change detection and automatic client polling fallback + `visibilitychange` fast catch-up. Spectators connect read-only via `?watch=1`.
+- **Accounts, archives & Elo (`lib/auth.ts`, `lib/elo.ts`, `app/api/auth/`, `app/api/games/`)**: Supports optional salted PBKDF2-SHA256 registration/login (100k iterations, constant-time verification including a dummy hash check for unknown usernames, expired-session pruning, and `HttpOnly; SameSite=Lax` D1 session cookies), K=32 Elo updates on finished rated rooms, server-validated AI/multiplayer archiving, replay URLs (`/?game=<id>`), and leaderboard queries.
+- **Rate limiting & health (`lib/rate-limit.ts`, `app/api/health/route.ts`)**: Protects registration/login (`40 req/min/IP`) and room creation (`60 req/min/IP`) with sliding-window isolate limits (`429` + `Retry-After`) and exposes `GET /api/health` checking D1 `SELECT 1`.
 
-## Game state
+## Movable layout & rendering
 
-A `RoomState` stores SAN move history, explicit result, draw offer, rematch request, and game number. `replay` reconstructs the chess position from history. Retaining history allows threefold repetition detection; storing FEN alone would lose it.
-
-All chess moves must pass chess.js legality. The server decides whose turn it is. Automatic repetition/fifty-move draws are a documented casual-play choice. There are no clocks and no automated opponent.
-
-## Multiplayer protocol
-
-- `POST /api/rooms` creates a room, reserving White for the requesting player.
-- `POST /api/rooms/:code` with `type: join` atomically claims the Black seat.
-- `GET /api/rooms/:code` returns state to an authenticated participant.
-- `POST /api/rooms/:code` with `type: action`, `revision`, and `action` validates and applies a move or game command.
-
-Every request carries a random player key in an Authorization header. The database stores its SHA-256 digest, not the key. Player digests are never returned in room responses. Keys are per-tab session state and are not account passwords.
-
-Updates use `WHERE code = ? AND revision = ?`. Only one writer can change a given revision. A second simultaneous/stale request gets a conflict instead of silently overwriting the first. Join uses the same mechanism, so two visitors cannot both claim Black.
-
-The client polls approximately every 900 ms when visible and every 4 seconds while hidden. Only one poll is in flight per effect; response revision checks prevent stale responses from rolling the board backward. Failed polls show reconnecting state and suppress moves. This is appropriate for casual turn-based chess; WebSockets would reduce latency for future timed modes.
-
-## Storage and limits
-
-D1 persists rooms through Worker restarts. Rooms become unavailable after seven days without a write. Expired rows are not yet physically purged. There is no matchmaking, spectator protocol, per-user rate limiter, or account recovery. Before a public launch these need explicit design. The initial hosted site is private and its hosting access policy is independent of game room membership.
-
-Local practice always uses the actual side to move, independent of hand identity or board orientation. Follow active side rotates the current color to the bottom. In online rooms the server still limits each player to their own color.
-
-## Movable layout and rendering
-`MovableSurface` applies translated offsets directly during pointer dragging, saves preferences on release/nudge, and clamps moved panels to the viewport. ResizeObserver and resize events keep saved layouts reachable. Layout events cancel unfinished gesture confirmation; arranging mode disables chess-square gestures while leaving menu nudges usable. Active pointer dragging pauses all air input. Hit testing always uses the actual translated square rectangle, so moving the board does not add a separate coordinate offset.
-
-Legal moves and game history are memoized by position/selection; board elements rerender for board/target changes, not every progress tick. Feedback percentages are coarsened without changing the confirmation timer or imperative cursor progress ring. Video-frame callbacks are cancelled with camera shutdown. The FPS and capture-to-result delay are measured, not advertised capabilities. No model simplification or resolution reduction is used.
+`MovableSurface` provides GPU-accelerated drag and keyboard/air-button nudges persisted per panel and clamped within the viewport (`ResizeObserver`). `ChessBoard` and `SidebarPanels` are memoized (`React.memo`), keyboard shortcuts handle navigation/utility keys cleanly, and `app/error.tsx` / `app/not-found.tsx` handle unexpected failures and missing routes gracefully.

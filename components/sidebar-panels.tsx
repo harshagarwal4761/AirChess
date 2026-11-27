@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { Color, Move } from "chess.js";
 import {
   Activity,
@@ -25,7 +25,8 @@ import {
 } from "lucide-react";
 import type { AimMode } from "../lib/air-pointer";
 import type { GestureLabel } from "../lib/gesture-features";
-import { TIME_CONTROLS, type RoomState, type TimeControlId } from "../lib/game";
+import { replay, TIME_CONTROLS, type RoomState, type TimeControlId } from "../lib/game";
+import { detectOpening } from "../lib/openings";
 import type { PlayMode } from "../lib/preferences";
 import { DIFFICULTY_PRESETS, type DifficultyPreset } from "../lib/stockfish";
 import { MovableSurface } from "./movable-surface";
@@ -99,12 +100,14 @@ type Props = {
   onLeaveWatch: () => void;
   onOpenModal: (modal: "leave" | "resign" | "reset") => void;
   onDownloadPgn: () => void;
+  currentFen: string;
+  onNotice: (message: string) => void;
 };
 
 const difficulties: DifficultyPreset[] = ["casual", "club", "master"];
 const timeControlIds: TimeControlId[] = ["untimed", "blitz3_2", "blitz5_0", "rapid10_0"];
 
-export function SidebarPanels({
+export const SidebarPanels = memo(function SidebarPanels({
   arranging,
   cameraActive,
   hand,
@@ -146,11 +149,56 @@ export function SidebarPanels({
   onLeaveWatch,
   onOpenModal,
   onDownloadPgn,
+  currentFen,
+  onNotice,
 }: Props) {
   const [onlineTab, setOnlineTab] = useState(false);
+  const [copiedKind, setCopiedKind] = useState<"fen" | "pgn" | null>(null);
+  const moveScrollRef = useRef<HTMLDivElement | null>(null);
   const totalPlies = history.length;
   const moveRows = Math.ceil(totalPlies / 2);
   const activeTab: "ai" | "practice" | "online" = room ? "online" : onlineTab ? "online" : playMode;
+  const opening = useMemo(() => detectOpening(state.moves), [state.moves]);
+
+  useEffect(() => {
+    const box = moveScrollRef.current;
+    if (!box) return;
+    const active = box.querySelector<HTMLElement>(".active-ply");
+    if (active && typeof active.scrollIntoView === "function") {
+      active.scrollIntoView({ block: "nearest" });
+    } else {
+      box.scrollTop = box.scrollHeight;
+    }
+  }, [viewPly, totalPlies]);
+
+  async function copyBoardText(kind: "fen" | "pgn") {
+    const text =
+      kind === "fen"
+        ? currentFen
+        : (() => {
+            const c = replay(state.moves);
+            c.header(
+              "Event",
+              "AirChess game",
+              "Result",
+              state.result
+                ? state.result.winner === "w"
+                  ? "1-0"
+                  : state.result.winner === "b"
+                    ? "0-1"
+                    : "1/2-1/2"
+                : "*",
+            );
+            return c.pgn();
+          })();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKind(kind);
+      setTimeout(() => setCopiedKind((prev) => (prev === kind ? null : prev)), 2000);
+    } catch {
+      onNotice(`${kind.toUpperCase()}: ${text}`);
+    }
+  }
 
   return (
     <aside className="sidebar">
@@ -538,6 +586,29 @@ export function SidebarPanels({
             </button>
             <button
               type="button"
+              className="mini-tool-btn"
+              data-air
+              aria-label="Copy FEN"
+              title="Copy FEN to clipboard"
+              onClick={() => void copyBoardText("fen")}
+            >
+              {copiedKind === "fen" ? <Check size={12} /> : <Copy size={12} />}
+              <span>FEN</span>
+            </button>
+            <button
+              type="button"
+              className="mini-tool-btn"
+              data-air
+              aria-label="Copy PGN"
+              title="Copy PGN to clipboard"
+              disabled={!totalPlies}
+              onClick={() => void copyBoardText("pgn")}
+            >
+              {copiedKind === "pgn" ? <Check size={12} /> : <Copy size={12} />}
+              <span>PGN</span>
+            </button>
+            <button
+              type="button"
               className="icon-button"
               data-air
               aria-label="Download PGN"
@@ -549,13 +620,19 @@ export function SidebarPanels({
             </button>
           </div>
         </div>
+        {opening && (
+          <div className="opening-badge" title={`${opening.eco} · ${opening.name}`}>
+            <span>{opening.eco}</span>
+            <strong>{opening.name}</strong>
+          </div>
+        )}
         <div className="move-table">
           <div className="move-table-header">
             <span>#</span>
             <span>WHITE</span>
             <span>BLACK</span>
           </div>
-          <div className="move-scroll">
+          <div className="move-scroll" ref={moveScrollRef}>
             {totalPlies ? (
               Array.from({ length: moveRows }, (_, i) => {
                 const whitePly = i * 2 + 1;
@@ -601,4 +678,4 @@ export function SidebarPanels({
       </MovableSurface>
     </aside>
   );
-}
+});

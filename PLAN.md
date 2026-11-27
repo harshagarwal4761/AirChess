@@ -127,3 +127,12 @@ Phase 8 checks: 36 unit tests, TypeScript validation, production build, and 12 b
 - [x] Add salted PBKDF2 account auth (`register`/`login`/`logout`/`me`) with HTTP-only D1 sessions alongside guest play.
 - [x] Expand Drizzle/D1 schema (`users`, `sessions`, `games`, room player links) with automatic game archiving and Elo rating updates.
 - [x] Add player profile modal, match history archive with one-click board replay, and Elo leaderboard.
+
+## Phase 15 — repo-wide hardening, performance, UX polish, and documentation
+- [x] Fix ESLint ignores (`public/`, `dist/`, `.wrangler/`, `.sites-runtime/`, `coverage/`), add `npm run check`, and make `npm run db:setup` non-interactive.
+- [x] Harden backend: sliding-window rate limits on auth & room creation, constant-time dummy PBKDF2 check & expired-session cleanup, single-query SSE `readRoomIfNewer`, server-enforced AI game archive outcomes (`<= 500` moves), and `GET /api/health` D1 readiness probe.
+- [x] Improve React performance & chess UX: isolate 100 ms ticks in `<MatchClock>` with single-shot auto-flag scheduling (eliminating 10 Hz root re-renders), memoize `ChessBoard` & `SidebarPanels`, add ECO opening detection (`lib/openings.ts`), Copy FEN/PGN buttons, auto-scrolling move list, keyboard shortcuts, `app/error.tsx` & `app/not-found.tsx`, OpenGraph metadata, and Settings gesture sample capture/export.
+- [x] Refresh `README.md`, `docs/ARCHITECTURE.md`, `docs/TESTING.md`, `docs/PORTFOLIO.md`, and `RESUME_POINTS.md` to reflect Phases 11–15 accurately.
+
+## Next — final webcam tracking pass
+- [ ] Run real-webcam FPS/latency/accuracy profiling across lighting/angles and perform the final air-tracking tuning pass.

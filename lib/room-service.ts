@@ -141,15 +141,19 @@ export async function watchRoom(code: string) {
   return spectatorView(row);
 }
 
-export async function getRoomRevision(code: string) {
+export async function readRoomIfNewer(
+  code: string,
+  knownRevision: number,
+  key: string,
+  watch: boolean,
+) {
   const db = getDb();
-  const row = await db
-    .select({ revision: rooms.revision, updatedAt: rooms.updatedAt })
-    .from(rooms)
-    .where(eq(rooms.code, code))
-    .get();
-  if (!row || Date.now() - row.updatedAt > lifetime) return null;
-  return row.revision;
+  const row = await db.select().from(rooms).where(eq(rooms.code, code)).get();
+  if (!row || Date.now() - row.updatedAt > lifetime) {
+    throw new RoomError("Room not found or expired.", 404);
+  }
+  if (row.revision <= knownRevision) return null;
+  return watch ? spectatorView(row) : view(row, key);
 }
 
 async function archiveFinishedRoomGame(

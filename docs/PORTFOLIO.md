@@ -2,35 +2,22 @@
 
 ## An honest project description
 
-> AirChess is a webcam-based multiplayer chess application. I built it with AI assistance using React and TypeScript, integrated MediaPipe's pretrained hand landmark model, and implemented pinch gestures, camera overlays, and server-validated game rooms. It uses chess.js for chess legality and Cloudflare D1 for persistent games.
+> AirChess is a full-stack webcam chess application built with React 19, TypeScript, Next.js/Vinext, Drizzle ORM, and Cloudflare Workers + D1. It integrates Google's pretrained MediaPipe 21-keypoint Hand Landmarker in a Web Worker alongside a One-Euro adaptive pointer filter, a custom 2-layer MLP gesture classifier trained on 520 synthesized biomechanical poses, a local Stockfish WebAssembly opponent, and SSE-synchronized online multiplayer rooms with blitz clocks, spectators, PBKDF2 authentication, and K=32 Elo ratings.
 
-Use this wording after you have studied and can explain the implementation. Do not claim custom model training, measured gesture accuracy, tournament-level adjudication, or production-scale reliability without doing that work.
+Always distinguish between external pretrained/engine dependencies (MediaPipe keypoints, `chess.js`, `stockfish.js`) and the parts engineered directly (worker pipeline, One-Euro + hysteresis controls, 2-layer MLP classifier, CAS multiplayer rooms, SSE stream, clocks, PBKDF2 auth, D1 archive & Elo, and UI).
 
 ## A 90-second demo
 
-1. Show the camera view and explain that inference stays on the device.
-2. Hold the index cursor on a pawn to select it, demonstrate second-hand pause, then hold on a legal destination. Show double-pinch mode as an alternative.
-3. Bring a friend into the room on another laptop; show their board is oriented for Black.
-4. Make one move from each laptop and show synchronization.
-5. Show promotion choices or a draw offer, then explain tracking-loss cancellation.
-6. Show the tests and one architecture diagram.
-
-Record this only after testing it on the actual devices. The local automated and browser checks do not replace a camera demonstration.
+1. Show local camera inference: cursor smoothing, steady-hover ring confirmation, and fist-hold cancel, noting zero frames leave the browser.
+2. Switch between **vs Stockfish WASM** (evaluation bar + best-move hint) and **Online** rooms (`3+2` clock, SSE instant sync, spectator `?watch=1` link).
+3. Show ECO opening detection, move-history scrubbing, Copy FEN/PGN, and keyboard shortcuts (`?`).
+4. Sign in via **Profile**, play or review an archived game (`/?game=<id>`), and inspect the Elo leaderboard.
+5. Mention the `npm run check` (52 unit tests) and D1 integration test suite.
 
 ## Questions worth being able to answer
 
-- What does the ML model output? (21 landmark coordinates, not a chess move.)
-- Did you train it? (No. It is pretrained; the application integrates it.)
-- Why normalize pinch distance? (Hands appear larger or smaller depending on distance.)
-- Why two thresholds? (To avoid noisy repeated grab/release transitions.)
-- Why validate moves on the server? (The client can be modified and can have stale state.)
-- What is a revision check? (A write succeeds only if the state has not changed since it was read.)
-- Why keep all moves? (To reconstruct the game and detect repetition.)
-- Why polling? (Simple hosting and adequate latency for untimed turn-based games.)
-- What remains limited? (Device variability, hand fatigue, handedness errors under occlusion, no clocks, no accounts, no broad abuse controls.)
-
-## Measurable next improvement
-
-Have a few volunteers make 20 prompted moves each. Record successful first attempts, accidental moves, tracking losses, and time-to-move under consistent lighting. Repeat after changing one parameter. Report the actual sample size and results. This is a better portfolio improvement than an unsupported claim of “99% accuracy.”
-
-Later, collect consented landmark sequences for a small gesture vocabulary, split by person for training/testing, and train a classifier. That would be a distinct custom-ML phase, not something this version already does.
+- **What outputs does MediaPipe give vs. your custom MLP?** MediaPipe outputs 21 normalized 3D hand keypoints; the custom 2-layer MLP (`26 → 24 ReLU → 4 Softmax`) classifies 26 scale/tilt-invariant palm-basis features into `open`, `pinch`, `fist`, or `peace`.
+- **How did you fix webcam lag and jitter?** Moved inference to a Web Worker with `inFlight` single-frame backpressure (`requestVideoFrameCallback`), defaulted `numHands` to 1, replaced naive EMA with an adaptive One-Euro filter, and isolated 100 ms chess clock ticks in `<MatchClock>` so the main board never re-renders at 10 Hz.
+- **How do online rooms prevent race conditions and clock cheating?** Compare-and-swap SQLite updates (`WHERE code = ? AND revision = ?`), server `serverNow` clock timestamps + server timeout validation, and SHA-256 hashed bearer tokens.
+- **How are passwords stored and rate limits enforced?** Salted PBKDF2-SHA256 (100k iterations, constant-time comparison including a dummy check for unknown users), HTTP-only cookies, and sliding-window per-IP rate limiting (`429` + `Retry-After`) on auth and room creation.
+- **What still needs measurement?** Live user accuracy across varied cameras/lighting using real consented webcam landmark recordings exported from the Settings sample recorder.

@@ -1,6 +1,6 @@
 import {
   credential,
-  getRoomRevision,
+  readRoomIfNewer,
   RoomError,
   roomRequest,
   subscribeRoom,
@@ -58,21 +58,12 @@ export async function GET(request: Request, context: Context) {
         }
       };
 
-      const sync = async (forceFetch = false) => {
+      const sync = async () => {
         if (closed || syncing) return;
         syncing = true;
         try {
-          if (!forceFetch) {
-            const rev = await getRoomRevision(code);
-            if (rev === null) {
-              send("closed", { error: "Room not found or expired." });
-              close();
-              return;
-            }
-            if (rev <= lastRevision) return;
-          }
-          const latest = watch ? await watchRoom(code) : await roomRequest(code, key);
-          if (latest.revision > lastRevision) {
+          const latest = await readRoomIfNewer(code, lastRevision, key, watch);
+          if (latest) {
             lastRevision = latest.revision;
             send("state", latest);
           }
@@ -87,9 +78,9 @@ export async function GET(request: Request, context: Context) {
       };
 
       const unsubscribe = subscribeRoom(code, () => {
-        void sync(true);
+        void sync();
       });
-      const pollTimer = setInterval(() => void sync(false), 600);
+      const pollTimer = setInterval(() => void sync(), 600);
       const pingTimer = setInterval(ping, 10_000);
       const maxLifetimeTimer = setTimeout(close, 25_000);
 

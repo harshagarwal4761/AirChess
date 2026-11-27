@@ -105,7 +105,6 @@ export default function AirChess() {
   const [hydrated, setHydrated] = useState(false);
   const [viewPly, setViewPly] = useState<number | null>(null);
   const [clockOffset, setClockOffset] = useState(0);
-  const [clockNow, setClockNow] = useState(() => Date.now());
   const [user, setUser] = useState<PublicUser | null>(null);
 
   const keyRef = useRef("");
@@ -146,21 +145,6 @@ export default function AirChess() {
       !state.result &&
       state.clock.lastTickAt !== null &&
       (!room || room.ready),
-  );
-  useEffect(() => {
-    if (!clockRunning) return;
-    const id = setInterval(() => setClockNow(Date.now()), 100);
-    return () => clearInterval(id);
-  }, [clockRunning]);
-
-  const clocks = useMemo(
-    () =>
-      effectiveClocks(
-        state,
-        liveChess.turn(),
-        clockNow + (room ? clockOffset : 0),
-      ),
-    [state, liveChess, clockNow, room, clockOffset],
   );
 
   const engineEnabled = hydrated && ((!room && playMode === "ai") || (analysisAllowed && (showEval || hintVisible)));
@@ -215,12 +199,12 @@ export default function AirChess() {
     safeSet("airchess.aiColor", value);
     setSelected(null);
   }
-  function toggleShowEval() {
+  const toggleShowEval = useCallback(() => {
     setShowEval((v) => {
       safeSet("airchess.showEval", String(!v));
       return !v;
     });
-  }
+  }, []);
   function toggleTwoHandPause() {
     setTwoHandPause((v) => {
       safeSet("airchess.twoHandPause", String(!v));
@@ -239,12 +223,27 @@ export default function AirChess() {
       return !v;
     });
   }
-  function toggleMuted() {
+  const toggleMuted = useCallback(() => {
     setMuted((v) => {
       safeSet("airchess.muted", String(!v));
       return !v;
     });
-  }
+  }, []);
+  const flipBoard = useCallback(() => {
+    setFollowTurn(false);
+    safeSet("airchess.followTurn", "false");
+    setFlipped(orientation === "w");
+  }, [orientation]);
+  const undoGame = useCallback(() => {
+    cancelSearch();
+    setLocal((prev) => {
+      const steps =
+        playMode === "ai" && liveChess.turn() === aiColor && prev.moves.length >= 2 ? 2 : 1;
+      return undoLocalMove(prev, steps);
+    });
+    setSelected(null);
+    setViewPly(null);
+  }, [cancelSearch, playMode, liveChess, aiColor]);
 
   const canMove =
     !state.result &&
@@ -315,24 +314,69 @@ export default function AirChess() {
   useEffect(() => {
     if (modal || promotion || arranging) return;
     const total = state.moves.length;
-    if (!total) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
-      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
-      if (e.key === "ArrowLeft") {
+      if (
+        target &&
+        (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === "ArrowLeft" && total) {
         e.preventDefault();
         setViewPly((prev) => Math.max(0, (prev ?? total) - 1));
-      } else if (e.key === "ArrowRight") {
+      } else if (e.key === "ArrowRight" && total) {
         e.preventDefault();
         setViewPly((prev) => {
           if (prev === null) return null;
           return prev + 1 >= total ? null : prev + 1;
         });
+      } else if (e.key === "Home" && total) {
+        e.preventDefault();
+        setViewPly(0);
+      } else if (e.key === "End" && total) {
+        e.preventDefault();
+        setViewPly(null);
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setModal("help");
+      } else {
+        const lower = e.key.toLowerCase();
+        if (lower === "f") {
+          e.preventDefault();
+          flipBoard();
+        } else if ((lower === "u" || lower === "z") && !room && total > 0 && !busy) {
+          e.preventDefault();
+          undoGame();
+        } else if (lower === "e" && analysisAllowed) {
+          e.preventDefault();
+          toggleShowEval();
+        } else if (lower === "h" && analysisAllowed && !state.result) {
+          e.preventDefault();
+          setHintVisible((v) => !v);
+        } else if (lower === "m") {
+          e.preventDefault();
+          toggleMuted();
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [modal, promotion, arranging, state.moves.length]);
+  }, [
+    modal,
+    promotion,
+    arranging,
+    state.moves.length,
+    state.result,
+    room,
+    busy,
+    analysisAllowed,
+    flipBoard,
+    undoGame,
+    toggleShowEval,
+    toggleMuted,
+  ]);
 
   useEffect(() => {
     if (!notice) return;
@@ -762,6 +806,7 @@ export default function AirChess() {
     start: startHand,
     stop: stopHand,
     recalibrate: recalibrateHand,
+    captureSample,
     status: handStatus,
     error: handError,
     fps: handFps,
@@ -793,37 +838,46 @@ export default function AirChess() {
         : `${liveChess.turn() === "w" ? "White" : "Black"} to move${liveChess.isCheck() ? " · Check!" : ""}`);
 
   useEffect(() => {
-    if (!clocks?.timedOut || state.result) return;
-    if (!room) {
-      queueMicrotask(() => {
+    if (!clockRunning || !state.clock || state.result) return;
+    const turn = liveChess.turn();
+    const offset = room ? clockOffset : 0;
+    const triggerFlag = () => {
+      const currentRoom = roomRef.current;
+      if (!currentRoom) {
         setLocal((prev) => {
           if (prev.result) return prev;
           try {
-            const next = applyAction(prev, liveChess.turn(), { type: "flag" }, clockNow);
+            const next = applyAction(prev, turn, { type: "flag" }, Date.now());
             playSound("end");
             return next;
           } catch {
             return prev;
           }
         });
-      });
-      return;
-    }
-    if (room.spectating || flaggedRevRef.current === room.revision) return;
-    flaggedRevRef.current = room.revision;
-    void api(`/${room.code}`, {
-      type: "action",
-      revision: room.revision,
-      action: { type: "flag" },
-    })
-      .then((next) => {
-        acceptRoom(next);
-        playSound("end");
+        return;
+      }
+      if (currentRoom.spectating || flaggedRevRef.current === currentRoom.revision) return;
+      flaggedRevRef.current = currentRoom.revision;
+      void api(`/${currentRoom.code}`, {
+        type: "action",
+        revision: currentRoom.revision,
+        action: { type: "flag" },
       })
-      .catch(() => {
-        flaggedRevRef.current = null;
-      });
-  }, [clocks?.timedOut, state.result, room, liveChess, clockNow, api, acceptRoom, playSound]);
+        .then((next) => {
+          acceptRoom(next);
+          playSound("end");
+        })
+        .catch(() => {
+          flaggedRevRef.current = null;
+        });
+    };
+
+    const view = effectiveClocks(state, turn, Date.now() + offset);
+    if (!view) return;
+    const remaining = turn === "w" ? view.wMs : view.bMs;
+    const id = setTimeout(triggerFlag, Math.max(0, remaining) + 40);
+    return () => clearTimeout(id);
+  }, [clockRunning, state, room, clockOffset, liveChess, api, acceptRoom, playSound]);
 
   async function copyWatchLink() {
     try {
@@ -1019,7 +1073,8 @@ export default function AirChess() {
             lastMove={lastMove}
             room={room}
             state={state}
-            clocks={clocks}
+            clockOffset={room ? clockOffset : 0}
+            liveTurn={liveChess.turn()}
             busy={busy}
             aiConfig={{
               active: playMode === "ai",
@@ -1042,22 +1097,9 @@ export default function AirChess() {
             evalScore={evalScore}
             hintMove={analysisAllowed && hintVisible && !isReviewing ? bestHint : null}
             onSquareClick={handleBoardSquareClick}
-            onFlip={() => {
-              setFollowTurn(false);
-              safeSet("airchess.followTurn", "false");
-              setFlipped(orientation === "w");
-            }}
+            onFlip={flipBoard}
             onDownloadPgn={downloadPgn}
-            onUndo={() => {
-              cancelSearch();
-              setLocal((prev) => {
-                const steps =
-                  playMode === "ai" && liveChess.turn() === aiColor && prev.moves.length >= 2 ? 2 : 1;
-                return undoLocalMove(prev, steps);
-              });
-              setSelected(null);
-              setViewPly(null);
-            }}
+            onUndo={undoGame}
             onJumpLive={() => setViewPly(null)}
             onOpenModal={(nextModal) => setModal(nextModal)}
             onAction={(action) => void act(action)}
@@ -1123,6 +1165,8 @@ export default function AirChess() {
           onLeaveWatch={leave}
           onOpenModal={(nextModal) => setModal(nextModal)}
           onDownloadPgn={downloadPgn}
+          currentFen={displayChess.fen()}
+          onNotice={setNotice}
         />
       </div>
 
@@ -1260,6 +1304,7 @@ export default function AirChess() {
         }}
         user={user}
         onUserChange={setUser}
+        onCaptureSample={captureSample}
         onReplayGame={(g) => {
           setRoom(null);
           roomRef.current = null;

@@ -11,6 +11,7 @@
     "build": "node scripts/run-framework.mjs build",
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "db:generate": "drizzle-kit generate",
     "test": "tsx --test tests/*.test.ts",
     "train:gestures": "tsx scripts/train-gesture-model.ts",

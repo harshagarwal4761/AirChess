@@ -2088,6 +2088,102 @@ h2 {
 .signout-btn {
   margin-top: 4px;
 }
+.opening-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #bfead629;
+  background: #122119;
+  font-size: 11px;
+  color: #dbeadf;
+}
+.opening-badge span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+  color: var(--mint);
+  font-size: 10px;
+}
+.opening-badge strong {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mini-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 7px;
+  border: 1px solid #cde2c524;
+  background: #122119;
+  color: #cfe0d3;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mini-tool-btn:hover:not(:disabled) {
+  border-color: var(--mint);
+  color: var(--ink);
+}
+.mini-tool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.shortcut-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #cde2c51f;
+  background: #101c16;
+  font-size: 11px;
+  color: #b7cabe;
+}
+.shortcut-grid div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.shortcut-grid kbd {
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid #cde2c533;
+  background: #17271f;
+  color: var(--mint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+}
+.sample-recorder {
+  margin-top: 10px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #cde2c524;
+  background: #101c16;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sample-recorder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: #dce9df;
+}
+.sample-recorder-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 @media (prefers-reduced-motion: reduce) {
   .eval-fill { transition: none; }
   .piece, .signature-knight { transition: none; }

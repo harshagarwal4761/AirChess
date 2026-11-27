@@ -1,4 +1,4 @@
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, lt } from "drizzle-orm";
 import { getDb } from "../db";
 import { sessions, users } from "../db/schema";
 
@@ -135,11 +135,16 @@ function parseSessionCookie(request: Request): string | null {
   return null;
 }
 
+const DUMMY_PBKDF2 =
+  "pbkdf2$100000$000102030405060708090a0b0c0d0e0f$000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f";
+
 async function createSessionCookie(userId: string, request: Request): Promise<string> {
   const db = getDb();
   const rawToken = toHex(crypto.getRandomValues(new Uint8Array(32)));
   const tokenHash = await sha256Hex(rawToken);
   const now = Date.now();
+  // Best-effort prune of expired sessions.
+  await db.delete(sessions).where(lt(sessions.expiresAt, now)).catch(() => {});
   await db.insert(sessions).values({
     id: tokenHash,
     userId,
@@ -204,7 +209,9 @@ export async function loginUser(rawUsername: string, rawPassword: string, reques
   const password = validatePassword(rawPassword);
   const db = getDb();
   const user = await db.select().from(users).where(eq(users.username, username)).get();
-  if (!user || !(await verifyPassword(password, user.passwordHash))) {
+  // Run PBKDF2 even when the user does not exist to prevent timing enumeration.
+  const ok = await verifyPassword(password, user?.passwordHash ?? DUMMY_PBKDF2);
+  if (!user || !ok) {
     throw new AuthError("Invalid username or password.", 401);
   }
   const cookie = await createSessionCookie(user.id, request);
