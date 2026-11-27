@@ -13,6 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "test": "tsx --test tests/*.test.ts",
+    "train:gestures": "tsx scripts/train-gesture-model.ts",
     "typecheck": "tsc --noEmit",
     "db:setup": "node scripts/migrate-local.mjs",
     "test:integration": "node tests/multiplayer.integration.mjs"

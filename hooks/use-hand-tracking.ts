@@ -9,6 +9,12 @@ import {
 import { cameraPoint, followPointer, hoverSelect, newHover, type AimMode, type PointerState } from "../lib/air-pointer";
 import { reachablePoint } from "../lib/air-controls";
 import {
+  classifyGesture,
+  GestureSmoother,
+  type RecordedGestureSample,
+} from "../lib/gesture-classifier";
+import type { GestureLabel } from "../lib/gesture-features";
+import {
   centerTarget,
   controllerIndex,
   newDoublePinch,
@@ -26,6 +32,8 @@ type Feedback = {
   helper: boolean;
   progress: number;
   pinched: boolean;
+  gesture: GestureLabel;
+  gestureConfidence: number;
   message: string;
 };
 const idleFeedback: Feedback = {
@@ -37,6 +45,8 @@ const idleFeedback: Feedback = {
   helper: false,
   progress: 0,
   pinched: false,
+  gesture: "open",
+  gestureConfidence: 0,
   message: "Show only your control hand, open, to begin.",
 };
 const connections = [
@@ -92,6 +102,7 @@ export function useHandTracking(
     generation: number;
     recalibrate?: () => void;
     timeout?: ReturnType<typeof setTimeout>;
+    latestLandmarks?: { points: Point[]; aspect: number } | null;
   }>({ generation: 0 });
   useEffect(() => {
     callback.current = onEvent;
@@ -117,6 +128,7 @@ export function useHandTracking(
     r.worker = undefined;
     r.stream = undefined;
     r.recalibrate = undefined;
+    r.latestLandmarks = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     cursorRef.current
       ?.querySelectorAll<HTMLElement>(".air-cursor")
@@ -136,6 +148,16 @@ export function useHandTracking(
   }, []);
   useEffect(() => () => stop(), [stop]);
   const recalibrate = useCallback(() => resources.current.recalibrate?.(), []);
+  const captureSample = useCallback((label: GestureLabel): RecordedGestureSample | null => {
+    const latest = resources.current.latestLandmarks;
+    if (!latest) return null;
+    return {
+      label,
+      aspect: latest.aspect,
+      points: latest.points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+      capturedAt: Date.now(),
+    };
+  }, []);
   const start = useCallback(async () => {
     stop();
     const r = resources.current,
@@ -182,7 +204,10 @@ export function useHandTracking(
         calibrationSince = 0,
         helperLastSeen = -Infinity,
         paused = false,
-        lastPalm: Point | null = null;
+        lastPalm: Point | null = null,
+        fistSince = 0,
+        fistCancelled = false;
+      const smoother = new GestureSmoother();
       let lastKey = options.current.interactionKey + options.current.mode,
         lastSeen = 0,
         lastTrack = 0,
@@ -217,6 +242,9 @@ export function useHandTracking(
         pointerState = null;
         hover = newHover(hover.blocked);
         lastPalm = null;
+        fistSince = 0;
+        fistCancelled = false;
+        smoother.reset();
         clearDwell();
         fired = null;
         if (cancelSelection) callback.current({ type: "cancel" });
@@ -384,10 +412,38 @@ export function useHandTracking(
           return;
         }
         lastPalm = palm;
-        const ratio = pinchRatio(
-          landmarks[primary],
-          video.videoWidth / video.videoHeight,
-        );
+        const aspect = video.videoWidth / Math.max(1, video.videoHeight);
+        r.latestLandmarks = { points: landmarks[primary], aspect };
+        const gesturePred = smoother.update(classifyGesture(landmarks[primary], aspect));
+        if (gesturePred.label === "fist" && gesturePred.confidence >= 0.86) {
+          if (!fistSince) fistSince = now;
+          if (!fistCancelled && now - fistSince >= 450) {
+            fistCancelled = true;
+            clearAttempt(true);
+            publish(
+              {
+                ...idleFeedback,
+                controllerReady: true,
+                gesture: "fist",
+                gestureConfidence: Math.round(gesturePred.confidence * 100),
+                message: "Fist hold — selection cancelled.",
+              },
+              true,
+            );
+            return;
+          }
+        } else {
+          fistSince = 0;
+          fistCancelled = false;
+        }
+        const rawRatio = pinchRatio(landmarks[primary], aspect);
+        // Fuse geometric ratio with tilt-invariant MLP probability for more reliable pinches.
+        const ratio =
+          gesturePred.probabilities.pinch > 0.88 && rawRatio < 0.52
+            ? Math.min(rawRatio, 0.32)
+            : gesturePred.probabilities.open > 0.88 && rawRatio > 0.48
+              ? Math.max(rawRatio, 0.72)
+              : rawRatio;
         const raw = options.current.reachAssist
           ? reachablePoint(points[8], {
               width: vw,
@@ -466,6 +522,8 @@ export function useHandTracking(
           locked: !isHover && Boolean(sequence.locked),
           controllerReady: true, helper: false,
           progress: Math.round(progress * 10) / 10, pinched: !isHover && state.pinched,
+          gesture: gesturePred.label,
+          gestureConfidence: Math.round(gesturePred.confidence * 100),
           message: confirmed ? `${confirmed} confirmed. Move to your next square.`
             : isHover
               ? target ? hover.blocked === target.square
@@ -574,6 +632,7 @@ export function useHandTracking(
     start,
     stop,
     recalibrate,
+    captureSample,
     status,
     error,
     fps,

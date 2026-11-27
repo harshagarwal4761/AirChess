@@ -22,6 +22,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import type { AimMode } from "../lib/air-pointer";
+import type { GestureLabel } from "../lib/gesture-features";
 import type { RoomState } from "../lib/game";
 import type { PlayMode } from "../lib/preferences";
 import { DIFFICULTY_PRESETS, type DifficultyPreset } from "../lib/stockfish";
@@ -39,6 +40,8 @@ type HandSummary = {
     helper: boolean;
     progress: number;
     pinched: boolean;
+    gesture: GestureLabel;
+    gestureConfidence: number;
     message: string;
   };
   start: () => void;
@@ -218,12 +221,13 @@ export function SidebarPanels({
             <span>
               {hand.fps} FPS · {hand.latency} ms · {hand.handCount} hand{hand.handCount === 1 ? "" : "s"}
               {hand.delegate ? ` · ${hand.delegate}` : ""}
+              {hand.feedback.gestureConfidence > 0 ? ` · ${hand.feedback.gesture} ${hand.feedback.gestureConfidence}%` : ""}
               {aimMode === "double-pinch" ? ` · Pinch ${hand.feedback.pinched ? "closed" : "open"}` : ""}
             </span>
             <span>
               {hand.feedback.helper
                 ? "Controls paused · lower the second hand to resume"
-                : "Second open palm pauses controls. Your selected piece is kept."}
+                : "Hold a fist briefly to cancel selection."}
             </span>
             {selected && (
               <button type="button" className="text-button" data-air onClick={onClearSelection}>

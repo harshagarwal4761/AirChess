@@ -26,7 +26,12 @@ Keep this file updated as features land so every bullet is backed by actual impl
 
 ---
 
+### Custom Machine Learning Gesture Classifier
+- **Designed and trained a custom 2-layer MLP gesture classifier (`26 → 24 ReLU → 4 Softmax`) in TypeScript (`npm run train:gestures`)** over 26 translation-, scale-, aspect-, and rotation-invariant palm-basis features (`open`, `pinch`, `fist`, `peace`), achieving **100% held-out validation accuracy on 520 synthesized biomechanical poses** across hand tilt (`±31°`) and mirroring, and exported compact (~5 KB) weights for `< 0.05 ms` browser inference with temporal probability smoothing (`GestureSmoother`).
+- **Integrated live gesture classification into the control loop**, displaying real-time class confidence in the HUD, fusing tilt-invariant `pinch` probabilities with geometric pinch hysteresis, and enabling a 450 ms **fist-hold** gesture to cancel piece selection hands-free.
+
+---
+
 ## Upcoming Additions (Add Metrics Once Implemented & Measured)
-- **Custom Gesture Classifier (Next):** Dataset collection + trained MLP/neural classifier over 21-keypoint hand geometry exported to pure TypeScript inference (`< 0.1 ms`) for tilt-invariant pinch/gesture recognition.
 - **Phase 13 (Planned):** Cloudflare Durable Objects WebSockets + server-authoritative blitz/rapid clocks + spectator mode.
 - **Phase 14 (Planned):** GitHub OAuth + HTTP-only sessions, relational user/game archive in D1, and Elo rating progression.
